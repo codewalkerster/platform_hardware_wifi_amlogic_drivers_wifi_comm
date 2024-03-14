@@ -19,10 +19,12 @@ int aml_wifi_bus_insmod(void)
     if (ret) {
         printk("aml sdio bus insmod fail\n");
     }
+#if 0
     ret = aml_wifi_pci_insmod();
     if (ret) {
         printk("aml pcie bus insmod fail\n");
     }
+#endif
     return 0;
 }
 
@@ -30,7 +32,7 @@ void aml_wifi_bus_rmmod(void)
 {
     aml_wifi_usb_rmmod();
     aml_wifi_sdio_rmmod();
-    aml_wifi_pci_rmmod();
+    //aml_wifi_pci_rmmod();
     printk("rmmod aml wifi comm");
 }
 module_init(aml_wifi_bus_insmod);
