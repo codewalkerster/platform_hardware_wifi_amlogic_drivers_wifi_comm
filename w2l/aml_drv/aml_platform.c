@@ -11,6 +11,8 @@
 #include <linux/module.h>
 #include <linux/firmware.h>
 #include <linux/delay.h>
+#include <linux/cpu.h>
+#include <linux/cpufreq.h>
 
 #include "aml_platform.h"
 #include "reg_access.h"
@@ -430,7 +432,7 @@ static int aml_plat_ihex_fw_upload(struct aml_plat *aml_plat, u8* fw_addr,
         /* Read record type */
         IHEX_READ8(rec_type, 1);
 
-        switch (rec_type) {
+        switch(rec_type) {
             case IHEX_REC_DATA:
             {
                 /* Update destination address */
@@ -1598,6 +1600,8 @@ int aml_sdio_create_thread(struct aml_hw *aml_hw)
 
     sema_init(&aml_hw->aml_rx_sem, 0);
     aml_hw->aml_rx_task_quit = 0;
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)
     aml_hw->aml_rx_task = kthread_run(aml_rx_task, aml_hw, "aml_rx_task");
     if (IS_ERR(aml_hw->aml_rx_task)) {
         kthread_stop(aml_hw->aml_irq_task);
@@ -1605,6 +1609,20 @@ int aml_sdio_create_thread(struct aml_hw *aml_hw)
         ERROR_DEBUG_OUT("create aml_rx_task error!!!!\n");
         return -1;
     }
+#else // template solution for S905L3A
+    {
+        aml_hw->aml_rx_task = kthread_create(aml_rx_task, aml_hw, "aml_rx_task", num_online_cpus() - 1);
+        if (IS_ERR(aml_hw->aml_rx_task)) {
+            kthread_stop(aml_hw->aml_irq_task);
+            aml_hw->aml_rx_task = NULL;
+            ERROR_DEBUG_OUT("create aml_rx_task error!!!!\n");
+            return -1;
+        }
+        kthread_bind(aml_hw->aml_rx_task, num_online_cpus() - 1);
+        wake_up_process(aml_hw->aml_rx_task);
+    }
+#endif
+
 
     sema_init(&aml_hw->aml_tx_sem, 0);
     aml_hw->aml_tx_task_quit = 0;
@@ -1768,6 +1786,60 @@ void manual_cali_config(struct aml_plat *aml_plat)
     AML_REG_WRITE(0x80103188, aml_plat, AML_ADDR_AON, RG_XOSC_A8);
 }
 
+int aml_cpufreq_boost_request(struct aml_hw *aml_hw)
+{
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)
+
+    struct cpufreq_policy *policy;
+    int ret;
+
+    policy = cpufreq_cpu_get(0);
+    if (IS_ERR_OR_NULL(policy)) {
+        pr_err("cpu0 policy not ready\n");
+        return -EINVAL;
+    }
+
+    aml_hw->qos_req = kcalloc(1, sizeof(*aml_hw->qos_req), GFP_KERNEL);
+    if (!aml_hw->qos_req) {
+        ret = -ENOMEM;
+        return ret;
+    }
+
+    ret = freq_qos_add_request(&policy->constraints, aml_hw->qos_req, FREQ_QOS_MIN,
+                   FREQ_QOS_MIN_DEFAULT_VALUE);
+    if (ret < 0) {
+        printk("Failed to add max-freq constraint (%d)\n", ret);
+        kfree(aml_hw->qos_req);
+        return ret;
+    }
+
+    cpufreq_cpu_put(policy);
+#endif
+    return 0;
+
+}
+
+int aml_cpufreq_boost_update(struct aml_hw *aml_hw)
+{
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)
+    int ret = 0;
+    aml_cpufreq_boost_request(aml_hw);
+    aml_hw->min_cpu_freq = cpufreq_quick_get_max(0);
+    ret = freq_qos_update_request(aml_hw->qos_req, aml_hw->min_cpu_freq);
+    if (ret < 0)
+        return ret;
+#endif
+    return 0;
+}
+
+int aml_cpufreq_boost_remove(struct aml_hw *aml_hw)
+{
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)
+    freq_qos_remove_request(aml_hw->qos_req);
+    kfree(aml_hw->qos_req);
+#endif
+    return 0;
+}
 
 extern int coex_flag;
 int aml_sdio_platform_on(struct aml_hw *aml_hw, void *config)
@@ -1872,7 +1944,13 @@ int aml_sdio_platform_on(struct aml_hw *aml_hw, void *config)
 
 
     /* XOSC manual cali setting while running when power on, it will be no useful after eco repair */
-    manual_cali_config(aml_plat);
+    if (bus_state_detect.is_recy_ongoing) {
+        if (aml_recy->reason == RECY_REASON_CODE_BUS_ERR)
+            manual_cali_config(aml_plat);
+
+    } else {
+        manual_cali_config(aml_plat);
+    }
 
     //AML_PRINT(AML_DBG_MODULES_PLATF, "%s:%d, value %x", __func__, __LINE__, aml_pci_readl(aml_plat->get_address(aml_plat, AML_ADDR_MAC_PHY, 0x00a070b4)));
 #ifndef CONFIG_PT_MODE
@@ -1960,10 +2038,10 @@ int aml_sdio_platform_on(struct aml_hw *aml_hw, void *config)
     }
     aml_hw->g_tx_param.txcfm_trigger_tx_thr = TXCFM_TRIGGER_TX_THR;
 
+    aml_amsdu_buf_list_init(aml_hw);
     if (aml_bus_type == SDIO_MODE) {
         aml_hw->g_tx_param.tx_page_free_num = SDIO_TX_PAGE_NUM_SMALL;
         aml_hw->g_tx_param.tx_page_tot_num = SDIO_TX_PAGE_NUM_SMALL;
-        aml_amsdu_buf_list_init(aml_hw);
         aml_sdio_scatter_reg_init(aml_hw);
         if ((ret = aml_plat->enable(aml_hw))) {
             aml_plat->enabled = true;
@@ -1976,14 +2054,16 @@ int aml_sdio_platform_on(struct aml_hw *aml_hw, void *config)
         usb_stor_control_msg(aml_hw, aml_hw->g_urb);
         aml_hw->g_tx_param.tx_page_free_num = USB_TX_PAGE_NUM_SMALL;
         aml_hw->g_tx_param.tx_page_tot_num = USB_TX_PAGE_NUM_SMALL;
+
+        USB_BEGIN_LOCK();
+        coex_flag = 1;
+        USB_END_LOCK();
     }
     aml_plat->enabled = true;
     aml_scatter_req_init(aml_hw);
 
     aml_tcp_delay_ack_init(aml_hw);
-    USB_BEGIN_LOCK();
-    coex_flag = 1;
-    USB_END_LOCK();
+
     AML_PRINT(AML_DBG_MODULES_PLATF, "%s %d end\n", __func__, __LINE__);
     return 0;
 }
@@ -2032,7 +2112,11 @@ int aml_prealloc_rxbuf_task(void *data)
             spin_unlock_bh(&aml_hw->prealloc_rxbuf_lock);
         }
     }
+#if LINUX_VERSION_CODE <= KERNEL_VERSION(5, 16, 20)
     complete_and_exit(&aml_hw->prealloc_completion, 0);
+#else
+    complete(&aml_hw->prealloc_completion);
+#endif
     return 0;
 }
 
@@ -2264,11 +2348,9 @@ void aml_platform_off(struct aml_hw *aml_hw, void **config)
     if (aml_bus_type != PCIE_MODE) {
         aml_hw->host_buf = NULL;
         aml_txbuf_list_deinit(aml_hw);
-        if (aml_bus_type == SDIO_MODE) {
 #ifndef CONFIG_AML_PREALLOC_BUF_STATIC
-            aml_amsdu_buf_list_deinit(aml_hw);
+        aml_amsdu_buf_list_deinit(aml_hw);
 #endif
-        }
     }
     if (aml_bus_type == USB_MODE) {
         if (aml_hw->g_buffer) {
@@ -2452,14 +2534,14 @@ extern int wifi_irq_num(void);
 static int aml_pci_platform_enable(struct aml_hw *aml_hw)
 {
     int ret;
-#ifdef CONFIG_PT_MODE
+#if 1
     struct sdio_func *func = aml_priv_to_func(SDIO_FUNC1);
 #else
     unsigned int irq_flag = 0;
 #endif
 
     if (aml_bus_type == SDIO_MODE) {
-#ifdef CONFIG_PT_MODE
+#if 1
         dev_set_drvdata(&func->dev, aml_hw);
         sdio_claim_host(func);
         sdio_claim_irq(func, aml_irq_sdio_hdlr_for_pt);
@@ -2487,7 +2569,7 @@ static int aml_pci_platform_enable(struct aml_hw *aml_hw)
 
 static int aml_pci_platform_disable(struct aml_hw *aml_hw)
 {
-#ifdef CONFIG_PT_MODE
+#if 1
     struct sdio_func *func = aml_priv_to_func(SDIO_FUNC1);
 
     sdio_claim_host(func);

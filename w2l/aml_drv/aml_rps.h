@@ -12,8 +12,14 @@
 #define _AML_RPS_H_
 
 int aml_rps_cpus_enable(struct net_device *net);
+int aml_rps_cpus_disable(struct net_device *net);
 int aml_xps_cpus_enable(struct net_device *net);
 int aml_rps_dev_flow_table_enable(struct net_device *net);
 int aml_rps_sock_flow_sysctl_enable(void);
+
+enum {
+    RPS_OFF,
+    RPS_ON
+};
 
 #endif /* _AML_RPS_H_ */

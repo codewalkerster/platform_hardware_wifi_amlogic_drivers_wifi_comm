@@ -398,7 +398,7 @@ int aml_dbgfs_txq_vif(char *buf, size_t size, struct aml_vif *aml_vif,
 {
     int res, idx = 0;
     struct aml_txq *txq;
-    struct aml_sta *aml_sta;
+    struct aml_sta *aml_sta, *tmp;
 
 #ifdef CONFIG_AML_FULLMAC
     res = scnprintf(&buf[idx], size, VIF_HDR, aml_vif->vif_index, aml_vif->ndev->name);
@@ -443,12 +443,15 @@ int aml_dbgfs_txq_vif(char *buf, size_t size, struct aml_vif *aml_vif,
             idx += res;
             size -= res;
         }
-
-        list_for_each_entry(aml_sta, &aml_vif->ap.sta_list, list) {
-            res = aml_dbgfs_txq_sta(&buf[idx], size, aml_sta, aml_hw);
-            idx += res;
-            size -= res;
+        spin_lock_bh(&aml_vif->vif_lock);
+        if (aml_vif->ap.sta_list.next) {
+            list_for_each_entry_safe(aml_sta, tmp, &aml_vif->ap.sta_list, list) {
+                res = aml_dbgfs_txq_sta(&buf[idx], size, aml_sta, aml_hw);
+                idx += res;
+                size -= res;
+            }
         }
+        spin_unlock_bh(&aml_vif->vif_lock);
     } else if (AML_VIF_TYPE(aml_vif) ==  NL80211_IFTYPE_STATION ||
                AML_VIF_TYPE(aml_vif) ==  NL80211_IFTYPE_P2P_CLIENT) {
         if (aml_vif->sta.ap) {
@@ -1450,7 +1453,7 @@ int print_rate_from_cfg(char *buf, int size, u32 rate_config, int *r_idx, int ru
         nss = mcs_index->he.nss;
         dcm = r_cfg->dcmTx;
         if (ft == FORMATMOD_HE_MU)
-            bw = ru_size;
+            bw = ru_size > 3 ? ru_size - 3 : ru_size;
     } else if (ft == FORMATMOD_VHT) {
         mcs = mcs_index->vht.mcs;
         nss = mcs_index->vht.nss;
@@ -1658,7 +1661,7 @@ static ssize_t aml_dbgfs_twt_request_write(struct file *file,
             i = 0;
             found = false;
             // Check if parameter is valid
-            while (accepted_params[i])
+            while(accepted_params[i])
             {
                 if (strcmp(accepted_params[i], param) == 0)
                 {
@@ -1705,7 +1708,7 @@ static ssize_t aml_dbgfs_twt_request_write(struct file *file,
             return -EFAULT;
         }
         line = strchr(line, ',');
-        if (line == NULL)
+        if(line == NULL)
             break;
         line++;
     }

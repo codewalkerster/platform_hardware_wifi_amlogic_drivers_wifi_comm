@@ -69,7 +69,7 @@ struct ipc_host_cb_tag
     uint8_t (*recv_dbg_ind)(void *pthis, void *host_id);
 
     /// WLAN driver call-back function: recv_trace_ind
-    int (*recv_trace_ind)(void *pthis, int mode);
+    int (*recv_trace_ind)(void *pthis);
 
 };
 

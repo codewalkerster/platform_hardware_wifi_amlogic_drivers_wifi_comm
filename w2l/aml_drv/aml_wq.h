@@ -31,11 +31,16 @@ enum aml_wq_type {
 #ifndef CONFIG_AML_DEBUGFS
     AML_WQ_ALLOC_RX_RATE,
 #endif
+    AML_WQ_HOST_GET_TRACE,
+    AML_WQ_HOST_SET_REGDOM,
+    AML_WQ_CANCEL_SCAN,
+    AML_WQ_IPV6,
     AML_WQ_MAX,
 };
 
 struct aml_wq {
     struct list_head list;
+    struct aml_vif *aml_vif;
     struct aml_hw *aml_hw;
     enum aml_wq_type id;
     uint8_t len;

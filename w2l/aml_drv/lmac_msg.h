@@ -397,6 +397,8 @@ enum priv_e2a_tag {
     PRIV_CSI_STATUS_COM_CFM,
     PRIV_CSI_STATUS_SP_CFM,
     PRIV_COEX_STOP_RESTORE_TXQ_IND,
+    PRIV_TRAFFIC_BUSY_IND,
+    PRIV_COEX_GET_STATUS,
     PRIV_SUB_E2A_MAX,
 };
 
@@ -450,6 +452,7 @@ enum mm_sub_a2e_tag {
     MM_SUB_CSI_SET,
     MM_SUB_FIX_TXPWR,
     MM_SUB_SET_EARLY_BEACON_MODE,
+    MM_SUB_COEX_GET_STATUS,
     /// the MAX
     MM_SUB_A2E_MAX,
     /// New members cannot be added below
@@ -1092,7 +1095,7 @@ struct mm_bcn_change_req
     /// Index of the VIF for which the beacon is updated
     u8_l inst_nbr;
     /// Offset of CSA (channel switch announcement) counters (0 means no counter)
-    u8_l csa_oft[BCN_MAX_CSA_CPT];
+    u16_l csa_oft[BCN_MAX_CSA_CPT];
 };
 
 
@@ -3027,7 +3030,7 @@ struct csi_com_status_get_ind
     u8_l csi_ready;
     u16_l agc_code[2];
     u16_l channel;
-    u16_l reserved3;
+    u16_l csi_abnormal_info;//bit0:phy csi not ready; bit1:idle
     u32_l packet_idx;
     /*add*/
     u32_l nrx;
@@ -3076,6 +3079,16 @@ struct dma_ul_result_ind
     u32_l payload;
 };
 #endif
+
+struct coex_get_status
+{
+    u8_l coex_state; //TDD or FDD;
+    u8_l work_mode;  // TDD reason;
+    u8_l tx_agg_num; //the tx agg num coex setting;
+    u8_l rx_agg_num; //the rx agg num coex setting;
+    u32_l bt_work_status; // bt connect info;
+};
+
 struct scan_hang_req
 {
     u8_l scan_hang;
@@ -3296,7 +3309,7 @@ typedef struct
     unsigned char ip_ver;
     unsigned char ipv4_addr[IPV4_ADDR_LEN];
     unsigned char ipv6_addr[IPV6_ADDR_LEN];
-}notify_ip_addr_t;
+} notify_ip_addr_t;
 
 typedef struct
 {

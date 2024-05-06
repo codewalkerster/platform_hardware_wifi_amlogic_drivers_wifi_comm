@@ -18,9 +18,14 @@
 #include <net/addrconf.h>
 #include <net/cfg80211.h>
 #include <net/ip.h>
-
+#include <linux/version.h>
+#if LINUX_VERSION_CODE > KERNEL_VERSION(6, 0, 0)
+#include <net/netdev_rx_queue.h>
+#endif
 #include "aml_rps.h"
 #include "aml_utils.h"
+#include "aml_interface.h"
+#include "aml_defs.h"
 
 #define AML_RPS_FLOW_ENTRIES    4096
 
@@ -41,7 +46,7 @@ static int aml_rps_map_set(struct netdev_rx_queue *queue, uint32_t cpu_mask)
         return -ENOMEM;
     }
 
-    sprintf(buf, "%0x", cpu_mask);
+    sprintf(buf, "%x", cpu_mask);
     err = bitmap_parse(buf, strlen(buf), cpumask_bits(mask), nr_cpumask_bits);
     if (err) {
         free_cpumask_var(mask);
@@ -65,35 +70,56 @@ static int aml_rps_map_set(struct netdev_rx_queue *queue, uint32_t cpu_mask)
     } else {
         kfree(map);
         map = NULL;
-        free_cpumask_var(mask);
-        AML_INFO("mapping cpu fail");
-        return -1;
     }
 
     mutex_lock(&rps_map_mutex);
     old_map = rcu_dereference_protected(queue->rps_map, mutex_is_locked(&rps_map_mutex));
     rcu_assign_pointer(queue->rps_map, map);
     if (map)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 10, 0)
         static_branch_inc(&rps_needed);
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0)
+        static_key_slow_inc(&rps_needed);
+#endif
     if (old_map)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 10, 0)
         static_branch_dec(&rps_needed);
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0)
+        static_key_slow_dec(&rps_needed);
+#endif
     mutex_unlock(&rps_map_mutex);
 
     if (old_map)
         kfree_rcu(old_map, rcu);
     free_cpumask_var(mask);
 
-    return map->len;
+    return 0;
 }
 
+extern unsigned int aml_bus_type;
 int aml_rps_cpus_enable(struct net_device *net)
+{
+    int rx_idx = 0;
+    uint32_t cpu_mask = BIT_FIELD_MASK(0, num_online_cpus() - 1);
+
+    if (aml_bus_type == PCIE_MODE)
+        cpu_mask = BIT_FIELD_MASK(0, num_online_cpus() - 1);
+    else if (aml_bus_type == SDIO_MODE)
+        cpu_mask = 1 << (num_online_cpus() - 1); //bind cpu for s905l3a
+    if (net && net->_rx) {
+        for (rx_idx = 0; rx_idx < net->num_rx_queues; rx_idx++)
+            aml_rps_map_set(net->_rx + rx_idx, cpu_mask);
+    }
+    return 0;
+}
+
+int aml_rps_cpus_disable(struct net_device *net)
 {
     int rx_idx = 0;
 
     if (net && net->_rx) {
         for (rx_idx = 0; rx_idx < net->num_rx_queues; rx_idx++)
-            aml_rps_map_set(net->_rx + rx_idx,
-                    BIT_FIELD_MASK(0, num_online_cpus() - 1));
+            aml_rps_map_set(net->_rx + rx_idx, 0);
     }
     return 0;
 }
@@ -262,12 +288,20 @@ static int aml_rps_sock_flow_sysctl_set(unsigned int size)
 
     rcu_assign_pointer(rps_sock_flow_table, sock_table);
     if (sock_table) {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 10, 0)
         static_branch_inc(&rps_needed);
         static_branch_inc(&rfs_needed);
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0)
+        static_key_slow_inc(&rps_needed);
+#endif
     }
     if (orig_sock_table) {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 10, 0)
         static_branch_dec(&rps_needed);
         static_branch_dec(&rfs_needed);
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0)
+        static_key_slow_dec(&rps_needed);
+#endif
         synchronize_rcu();
         vfree(orig_sock_table);
     }
@@ -287,3 +321,27 @@ int aml_rps_sock_flow_sysctl_enable(void)
 
     return 0;
 }
+
+// template solution for S905L3A
+void aml_rps_switch_check(struct aml_hw *aml_hw, u8 flag)
+{
+    struct aml_vif *aml_vif;
+
+    list_for_each_entry(aml_vif, &aml_hw->vifs, list) {
+        if (!aml_vif->up || aml_vif->ndev == NULL) {
+            continue;
+        }
+        if (AML_VIF_TYPE(aml_vif) == NL80211_IFTYPE_STATION ||
+            AML_VIF_TYPE(aml_vif) == NL80211_IFTYPE_P2P_CLIENT) {
+            printk("%s:%d, flag %d\n", __func__, __LINE__, flag);
+#ifndef CONFIG_LINUXPC_VERSION
+            if (flag == RPS_ON) {
+                aml_rps_cpus_enable(aml_vif->ndev);
+            } else {
+                aml_rps_cpus_disable(aml_vif->ndev);
+            }
+#endif
+        }
+    }
+}
+

@@ -13,7 +13,7 @@
 #ifndef __AML_STATIC_BUF__
 #define __AML_STATIC_BUF__
 
-#define WLAN_AML_HW_RX_SIZE (5 * (324 * 1024))
+#define WLAN_AML_HW_RX_SIZE (5 * (340 * 1024))
 #define WLAN_AML_HW_TEMP_RX_SIZE (1 * (10 * 1024))
 
 #define WLAN_AML_SDIO_SIZE (320 * 1024)
@@ -21,7 +21,7 @@
 #define FW_VERBOSE_RING_SIZE (260 * 1024)
 #define AML_PREALLOC_BUF_TYPE_TXQ_SIZE (36 * 1024)
 #define AML_PREALLOC_BUF_TYPE_DUMP_SIZE (1290 * 1024)
-
+#define AML_PREALLOC_TRACE_EXPEND_BUF_SIZE (96 * 1024)
 
 enum aml_prealloc_index {
     AML_PREALLOC_BUF_TYPE_TXQ = 7,
@@ -30,6 +30,7 @@ enum aml_prealloc_index {
     AML_PREALLOC_HW_RX = 24,
     AML_PREALLOC_SDIO = 25,
     AML_PREALLOC_AMSDU = 26,
+    AML_PREALLOC_TRACE_EXPEND_BUF = 27,
     AML_PREALLOC_MAX
 };
 

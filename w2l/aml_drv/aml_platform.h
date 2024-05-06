@@ -21,12 +21,12 @@
 
 #include "chip_intf_reg.h"
 
-#define AML_CONFIG_FW_NAME             "aml_settings.ini"
-#define AML_PHY_CONFIG_TRD_NAME        "aml_trident.ini"
-#define AML_PHY_CONFIG_KARST_NAME      "aml_karst.ini"
+#define AML_CONFIG_FW_NAME             "w2l/aml_settings.ini"
+#define AML_PHY_CONFIG_TRD_NAME        "w2l/aml_trident.ini"
+#define AML_PHY_CONFIG_KARST_NAME      "w2l/aml_karst.ini"
 
 //change version when update agcram configuration
-#define AML_AGC_FW_NAME                "agcram_ind_20230223.bin"
+#define AML_AGC_FW_NAME                "w2l/agcram_ind_20230223.bin"
 
 #define AML_LDPC_RAM_NAME              "ldpcram.bin"
 #define AML_CATAXIA_FW_NAME            "cataxia.fw"
@@ -43,9 +43,9 @@
 #else
 #define AML_MAC_FW_NAME  AML_MAC_FW_BASE_NAME".ihex"
 #define AML_MAC_FW_NAME2 AML_MAC_FW_BASE_NAME".bin"
-#define AML_MAC_FW_SDIO "wifi_w2l_fw_sdio.bin"
-#define AML_MAC_FW_USB "wifi_w2l_fw_usb.bin"
-#define AML_MAC_FW_PCIE "wifi_w2l_fw_pcie.bin"
+#define AML_MAC_FW_SDIO "w2l/wifi_w2l_fw_sdio.bin"
+#define AML_MAC_FW_USB "w2l/wifi_w2l_fw_usb.bin"
+#define AML_MAC_FW_PCIE "w2l/wifi_w2l_fw_pcie.bin"
 #endif
 
 #define AML_FCU_FW_NAME                "fcuram.bin"
@@ -207,6 +207,11 @@ struct aml_plat {
     u8 priv[0] __aligned(sizeof(void *));
 };
 
+struct traffic_busy
+{
+    uint8_t traffic_busy_flag;
+    uint8_t td_flag;
+};
 
 #define AML_ADDR(plat, base, offset)  (plat->get_address(plat, base, offset))
 

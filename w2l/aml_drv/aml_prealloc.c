@@ -68,6 +68,14 @@ void *aml_prealloc_get(int type, size_t size, size_t *out_size)
             prealloc_buf = aml_mem_prealloc(AML_PREALLOC_AMSDU, size);
             *out_size = WLAN_AML_AMSDU_SIZE;
             break;
+        case PREALLOC_TRACE_EXPEND:
+            if (size > AML_PREALLOC_TRACE_EXPEND_BUF_SIZE) {
+                AML_PRINT(AML_DBG_MODULES_CMD, "not enough pre-alloc buffer size(%ld) for trace expend\n", size);
+                return NULL;
+            }
+            prealloc_buf = aml_mem_prealloc(AML_PREALLOC_TRACE_EXPEND_BUF, size);
+            *out_size = AML_PREALLOC_TRACE_EXPEND_BUF_SIZE;
+            break;
         default:
             AML_PRINT(AML_DBG_MODULES_CMD, "not support pre-alloc buffer type(%d)\n", type);
             break;

@@ -318,12 +318,14 @@ enum {
 
 #define aml_cfg80211_change_iface(wiphy, dev, type, params) \
     aml_cfg80211_change_iface(wiphy, dev, type, u32 *flags, params)
+
+#define nla_parse(tb, maxtype, head, len, policy, extack)       \
+    nla_parse(tb, maxtype, head, len, policy)
+
 #endif
 #define CCFS0(vht) vht->center_freq_seg1_idx
 #define CCFS1(vht) vht->center_freq_seg2_idx
 
-#define nla_parse(tb, maxtype, head, len, policy, extack)       \
-    nla_parse(tb, maxtype, head, len, policy)
 
 struct cfg80211_roam_info {
 	struct ieee80211_channel *channel;
@@ -341,7 +343,11 @@ struct cfg80211_roam_info {
 
 #else // 4.12
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0)
 #define CCFS0(vht) vht->center_freq_seg0_idx
+#else
+#define CCFS0(vht) vht->center_freq_seg1_idx
+#endif
 #define CCFS1(vht) vht->center_freq_seg1_idx
 #endif // 4.12
 
@@ -520,7 +526,7 @@ static inline void SKB_APPEND(struct sk_buff *old, struct sk_buff *newsk, struct
 /******************************************************************************
  * File
  *****************************************************************************/
-#if defined(__ANDROID_COMMON_KERNEL__) || defined(CONFIG_AML_ANDROID) /* for android */
+#if defined(__ANDROID_COMMON_KERNEL__) || defined(CONFIG_AML_ANDROID) || defined(CONFIG_BUILDROOT)
   #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0)
     #define DISABLE_FILE_OPS
   #endif
@@ -564,7 +570,7 @@ static inline int FILE_CLOSE(struct file *filp, fl_owner_t id)
 
 static inline int FILE_STAT(const char __user *filename, struct kstat *stat)
 {
-#ifdef CONFIG_ANDROID_GKI
+#if defined (CONFIG_ANDROID_GKI) || defined (CONFIG_BUILDROOT)
 	UNUSED(filename);
 	UNUSED(stat);
 	return -ENOTSUPP;

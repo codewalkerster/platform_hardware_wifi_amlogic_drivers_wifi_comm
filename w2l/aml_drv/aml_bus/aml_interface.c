@@ -4,6 +4,7 @@
 #include <linux/kernel.h>
 #include "aml_static_buf.h"
 #include "aml_interface.h"
+#include "aml_compat.h"
 #include "wifi_debug.h"
 
 char *bus_type = "pci";

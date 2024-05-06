@@ -70,8 +70,8 @@
 
 // WIFI_CALI_VERSION must be consistent with the version field in "/vendor/firmware/"
 // After updating the parameters, it must be modified at the same time.
-#define WIFI_CALI_VERSION   (15)
-#define WIFI_CALI_FILENAME  "aml_wifi_rf.txt"
+#define WIFI_CALI_VERSION   (16)
+#define WIFI_CALI_FILENAME  "w2l/aml_wifi_rf.txt"
 
 #define STRUCT_BUFF_LEN   252
 #define MAX_HEAD_LEN      92
@@ -91,6 +91,7 @@
 
 #define AML_CONNECTING   BIT(0)
 #define AML_DISCONNECTING   BIT(1)
+#define AML_GETTING_IP   BIT(2)
 
 enum wifi_module_sn {
       MODULE_ITON = 0X1,
@@ -268,7 +269,7 @@ enum aml_sta_flags {
  * @tdls_status: Status of the TDLS link
  * @tdls_chsw_prohibited: Whether TDLS Channel Switch is prohibited or not
  * @generation: Generation ID. Increased each time a sta is added/removed
- * @ap_lock: Add lock protect for AP info(vif->sta.ap, only valid STA/P2P Client)
+ * @vif_lock: Add lock to protect for union sta/ap content
  *
  * STA / P2P_CLIENT interfaces
  * @flags: see aml_sta_flags
@@ -315,9 +316,12 @@ struct aml_vif {
     int generation;
     u32 filter;
     u8 is_disconnect;
-    spinlock_t ap_lock;
-    spinlock_t sta_lock; // for AP or GO interface
     unsigned char ipv4_addr[IPV4_ADDR_LEN];
+    unsigned char subnet_mask[IPV4_ADDR_LEN];
+    /* protect union sta/ap content */
+    spinlock_t vif_lock;
+    u8 p2p_negotiation_state;
+    struct tx_cfm_wait_rsp tx_cfm_wait;
     union
     {
         struct
@@ -333,6 +337,7 @@ struct aml_vif {
             u8 cancel_scan_cfm;
             u8 assoc_ssid[MAC_SSID_LEN];
             int assoc_ssid_len;
+            u8 connect_flags;
         } sta;
         struct
         {
@@ -473,6 +478,7 @@ struct aml_sta {
     u8 ch_idx;
     bool qos;
     u8 acm;
+    u8 txq_en;
     u16 uapsd_tids;
     struct aml_key key;
     struct aml_sta_ps ps;
@@ -491,6 +497,7 @@ struct aml_sta {
     enum nl80211_mesh_power_mode mesh_pm;
     int listen_interval;
     struct twt_setup_ind twt_ind; /*TWT Setup indication*/
+    u8 csa_support;
 };
 
 #define AML_INVALID_STA 0xFF
@@ -586,6 +593,11 @@ typedef struct {
     uint32_t rx_cnt_in_rx;
     uint32_t mpdu_in_rx;
     uint32_t avg_mpdu_in_one_rx;
+
+    uint32_t hostid_pushed;
+    uint32_t start_blk;
+    uint32_t read_blk;
+    uint32_t drv_txcfm_idx;
 } cfm_log;
 #endif
 
@@ -600,6 +612,7 @@ typedef struct {
     uint32_t start_blk;
     /* the SDIO blocks need to be read from txcfm sharemem */
     uint32_t read_blk;
+    uint32_t hostid_pushed;
 } txcfm_param_t;
 #endif
 
@@ -626,6 +639,7 @@ struct aml_roc {
     bool on_chan;
     int tx_cnt;
     u64 tx_cookie[NX_ROC_TX];
+    unsigned long start_time;
 };
 
 /**
@@ -715,6 +729,7 @@ struct tx_amsdu_param {
 struct assoc_info {
     u8 addr[ETH_ALEN];
     u16 htcap;
+    u8 csa_support;
 };
 
 /**
@@ -804,7 +819,6 @@ struct aml_hw {
     enum wifi_suspend_state state;
     u8 suspend_ind;
     u8 google_cast;
-    u8 connect_flags;
 
     // Stations
     struct aml_sta *sta_table;
@@ -917,13 +931,13 @@ struct aml_hw {
     txcfm_param_t txcfm_param;
 #endif
 /*add 16byte for bt read/write point*/
-    struct tx_sdio_usb_cfm_tag read_cfm[SRAM_TXCFM_CNT+1];
+    struct w2l_tx_sdio_usb_cfm_tag read_cfm[SRAM_TXCFM_CNT+1];
 
     struct scan_results *scan_results;
     uint8_t *scanres_payload_buf;
     uint32_t scanres_payload_buf_offset;
     struct list_head scan_res_list;
-    struct list_head scan_res_avilable_list;
+    struct list_head scan_res_available_list;
     spinlock_t scan_lock;
 
     u32 irq;
@@ -980,6 +994,8 @@ struct aml_hw {
     struct usb_ctrlrequest *g_cr;
     unsigned char *g_buffer;
     u8 la_enable;
+    u8 trace_bit_flag;
+    struct timer_list detection_trace_timer;
     // Debug FS and stats
     struct aml_debugfs debugfs;
     struct aml_stats *stats;
@@ -1010,6 +1026,9 @@ struct aml_hw {
     u8 napi_pend_pkt_num;
 #endif
     uint32_t recv_pkt_len;
+    struct freq_qos_request *qos_req;
+    u8 traffic_busy;
+    int min_cpu_freq;
 };
 
 u8 *aml_build_bcn(struct aml_bcn *bcn, struct cfg80211_beacon_data *new);
@@ -1061,9 +1080,9 @@ static inline void aml_spin_unlock(spinlock_t* lock)
     (aml_bus_type == PCIE_MODE) ? spin_unlock(lock) : spin_unlock_bh(lock);
 #endif
 }
-void aml_connect_flags_set(struct aml_hw *aml_hw, u32 flags);
-void aml_connect_flags_clr(struct aml_hw *aml_hw, u32 flags);
-bool aml_connect_flags_chk(struct aml_hw *aml_hw, u32 flags);
+void aml_connect_flags_set(struct aml_vif *aml_vif, u32 flags);
+void aml_connect_flags_clr(struct aml_vif *aml_vif, u32 flags);
+bool aml_connect_flags_chk(struct aml_vif *aml_vif, u32 flags);
 
 void aml_external_auth_enable(struct aml_vif *vif);
 void aml_external_auth_disable(struct aml_vif *vif);

@@ -19,7 +19,7 @@
 // pmu status
 #define PMU_ACT_MODE      (0x6)
 #define PMU_SLEEP_MODE    (0x8)
-
+#define AML_MIN_ROC_DUR   102
 
 int aml_cfg80211_init(struct aml_plat *aml_plat, void **platform_data);
 void aml_cfg80211_deinit(struct aml_hw *aml_hw);
@@ -37,5 +37,6 @@ int aml_config_cali_param(struct aml_hw *aml_hw);
 void aml_set_scan_hang(struct aml_vif *aml_vif, int scan_hang, u8* func, u32 line);
 u32 aml_pci_readl(u8* addr);
 void aml_pci_writel(u32 data, u8* addr);
+aml_change_he_mcs(struct aml_hw *aml_hw, u8 *var_pos, u8 len);
 
 #endif /* _AML_MAIN_H_ */

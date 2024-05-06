@@ -58,6 +58,38 @@ u32 aml_get_p2p_ie_offset(const u8 *buf,u32 frame_len)
     return 0;
 }
 
+/*
+Public Aciton frames with WFD IE have two Tagged Parameters that have same P2P_ATTR_VENDOR_SPECIFIC(221).
+Therefore, double check is required to confirm that WFD IE is present!
+*/
+bool_l aml_is_include_miracast_ie(const u8 *buf,u32 frame_len)
+{
+    u8 id;
+    u8 len;
+    u32 offset;
+
+    offset = aml_get_p2p_ie_offset(buf, frame_len);
+    if (offset != 0) {
+        if (buf[offset + 5] == WFD_IE_OUI_TYPE) {
+            return true;
+        }
+        else {
+            len = buf[offset + 1];
+            offset += len + 2;
+            while (offset < frame_len) {
+                id = buf[offset];
+                len = buf[offset + 1];
+                if ((id == P2P_ATTR_VENDOR_SPECIFIC) && (buf[offset + 2] == 0x50) && (buf[offset + 3] == 0x6f) && (buf[offset + 4] == 0x9a)) {
+                    if (buf[offset + 5] == WFD_IE_OUI_TYPE) {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    return false;
+}
+
 u16 aml_scc_p2p_rewrite_chan_list(u8* buf, u32 offset, u8 target_chan_no, enum nl80211_band target_band)
 {
     u32 idx = P2P_ATT_COUNTRY_STR_LEN + P2P_ATT_BODY_OFT;

@@ -25,9 +25,11 @@
 #endif
 
 #define DGB_INFO_OFFSET (16) //for sdio and usb, sizeof(struct dma_desc)
-extern struct log_file_info trace_log_file_info;
 #define USB_AMSDU_BUF_LEN (4624)
 
+extern struct log_file_info trace_log_file_info;
+extern struct aml_pm_type g_wifi_pm;
+extern struct aml_bus_state_detect bus_state_detect;
 /**
  * aml_ipc_buf_pool_alloc() - Allocate and push to fw a pool of IPC buffer.
  *
@@ -999,7 +1001,7 @@ void aml_txbuf_list_init(struct aml_hw *aml_hw)
 
 void aml_tx_cfmed_list_init(struct aml_hw *aml_hw)
 {
-    memset(aml_hw->read_cfm, 0, sizeof(struct tx_sdio_usb_cfm_tag) * SRAM_TXCFM_CNT);
+    memset(aml_hw->read_cfm, 0, sizeof(struct w2l_tx_sdio_usb_cfm_tag) * SRAM_TXCFM_CNT);
     INIT_LIST_HEAD(&aml_hw->tx_cfmed_list);
 }
 
@@ -1022,12 +1024,12 @@ void aml_scan_results_list_init(struct aml_hw *aml_hw)
     memset(aml_hw->scan_results, 0, sizeof(struct scan_results) * SCAN_RESULTS_MAX_CNT);
     spin_lock_init(&aml_hw->scan_lock);
     INIT_LIST_HEAD(&aml_hw->scan_res_list);
-    INIT_LIST_HEAD(&aml_hw->scan_res_avilable_list);
+    INIT_LIST_HEAD(&aml_hw->scan_res_available_list);
 
     aml_hw->scanres_payload_buf_offset = 0;
     scan_results = aml_hw->scan_results;
     for (i = 0; i < SCAN_RESULTS_MAX_CNT; i++, scan_results++) {
-        list_add_tail(&scan_results->list, &aml_hw->scan_res_avilable_list);
+        list_add_tail(&scan_results->list, &aml_hw->scan_res_available_list);
     }
 }
 
@@ -1036,7 +1038,7 @@ struct scan_results *aml_scan_get_scan_res_node(struct aml_hw *aml_hw)
 {
     struct scan_results *scan_res;
     spin_lock_bh(&aml_hw->scan_lock);
-    scan_res = list_first_entry_or_null(&aml_hw->scan_res_avilable_list,
+    scan_res = list_first_entry_or_null(&aml_hw->scan_res_available_list,
                                          struct scan_results, list);
     if (!scan_res) {
         spin_unlock_bh(&aml_hw->scan_lock);
@@ -1189,17 +1191,24 @@ int aml_tx_task(void *data)
     uint32_t  dynabuf_size = 0;
     struct tx_amsdu_param *txamsdu = NULL;
     unsigned int blk_size = 512;
+    bool sdio_bus_block = false;
+    unsigned char func_num = 0;
+    int addr = 0;
 
     if ((amsdu_dynabuf = vmalloc(sizeof(uint8_t *) * 256)) == NULL) {
         if (aml_hw->aml_tx_completion_init) {
             aml_hw->aml_tx_completion_init = 0;
+#if LINUX_VERSION_CODE <= KERNEL_VERSION(5, 16, 20)
             complete_and_exit(&aml_hw->aml_tx_completion, 0);
+#else
+            complete(&aml_hw->aml_tx_completion);
+#endif
         }
         return -1;
     }
     memset(amsdu_dynabuf, 0, sizeof(uint8_t *) * 256);
 
-    sch_param.sched_priority = 92;
+    sch_param.sched_priority = 91;
 #ifndef CONFIG_PT_MODE
     sched_setscheduler(current, SCHED_FIFO, &sch_param);
 #endif
@@ -1217,6 +1226,7 @@ int aml_tx_task(void *data)
         if (aml_hw->dynabuf_stop_tx == DYNAMIC_BUF_HOST_TX_STOP) {
             if (aml_hw->send_tx_stop_to_fw) {
                 if (aml_hw->g_tx_param.tx_page_free_num == aml_hw->g_tx_param.tx_page_tot_num) {
+                    AML_INFO("%s, %d, stop tx, free_page_num=%d\n", __func__, __LINE__, aml_hw->g_tx_param.tx_page_free_num);
                     aml_hw->send_tx_stop_to_fw = 0;
                     aml_host_send_stop_tx_to_fw(aml_hw);
                 } else {
@@ -1230,7 +1240,25 @@ int aml_tx_task(void *data)
         if (list_empty(&aml_hw->tx_desc_save)) {
             continue;
         }
+        if (aml_bus_type == SDIO_MODE) {
+            sdio_bus_block = aml_sdio_block_bus_opt(func_num,addr);
+            if (sdio_bus_block) {
+                continue;
+            }
+#ifdef CONFIG_AML_RECOVERY
+            if (bus_state_detect.bus_err) {
+                continue;
+            }
+#endif
+        }
 
+        if (aml_bus_type == SDIO_MODE) {
+            if (aml_hw->rx_buf_state & FW_BUFFER_EXPAND) {
+                if (aml_hw->g_tx_param.tx_page_free_num > SDIO_TX_PAGE_NUM_SMALL) {
+                  AML_INFO("%s, %d, page_free=%d, tot_page=%d\n", __func__, __LINE__, aml_hw->g_tx_param.tx_page_free_num, aml_hw->g_tx_param.tx_page_tot_num);
+                }
+            }
+        }
         spin_lock_bh(&aml_hw->tx_desc_lock);
         list_for_each_entry_safe(sw_txhdr, next, &aml_hw->tx_desc_save, list) {
             txdesc_host = &sw_txhdr->desc;
@@ -1250,7 +1278,11 @@ int aml_tx_task(void *data)
                 for (i = 0; i < txdesc_host->api.host.packet_cnt; i++) {
                     frame_tot_len += txdesc_host->api.host.packet_len[i];
                 }
+                #if 0
                 page_num = howmanypage(frame_tot_len + SDIO_DATA_OFFSET + SDIO_FRAME_TAIL_LEN, SDIO_PAGE_LEN);
+                #else
+                page_num = sw_txhdr->desc.api.host.packet_cnt; //the total of amsdu
+                #endif
             }
 
             if (((page_num + 1)  <= aml_hw->g_tx_param.tx_page_free_num)
@@ -1281,7 +1313,7 @@ int aml_tx_task(void *data)
 #endif
 
                 if (aml_bus_type == SDIO_MODE) {
-
+#if 0
                     if (sw_txhdr->desc.api.host.flags & TXU_CNTRL_AMSDU) {
                         struct aml_amsdu_txhdr *amsdu_txhdr, *tmp;
                         sdio_txhdr = (struct aml_sdio_txhdr *)sw_txhdr->skb->data;
@@ -1317,7 +1349,7 @@ int aml_tx_task(void *data)
                             dynabuf_size = ALIGN(frame_tot_len + SDIO_TXHEADER_LEN + SDIO_FRAME_TAIL_LEN + 1, blk_size);
                             amsdu_dynabuf[dynabuf_id] = kzalloc(dynabuf_size, GFP_ATOMIC);
                             if (!amsdu_dynabuf[dynabuf_id]) {
-                                AML_PRINT(AML_DBG_MODULES_UTILS, "*************%s:%d, malloc amsdu dynabuf failed****************\n", __LINE__, __func__);
+                                AML_PRINT(AML_DBG_MODULES_UTILS, "*************%s:%d, malloc amsdu dynabuf failed****************\n", __func__, __LINE__);
                                 break;
                             }
                             memcpy(amsdu_dynabuf[dynabuf_id], frm, amsdu_len);
@@ -1340,7 +1372,7 @@ int aml_tx_task(void *data)
                         dynabuf_size = ALIGN(sw_txhdr->frame_len + SDIO_TXHEADER_LEN  + SDIO_FRAME_TAIL_LEN + 1, blk_size);
                         amsdu_dynabuf[dynabuf_id] = kzalloc(dynabuf_size, GFP_ATOMIC);
                         if (!amsdu_dynabuf[dynabuf_id]) {
-                            AML_PRINT(AML_DBG_MODULES_UTILS, "*************%s:%d, malloc amsdu dynabuf failed****************\n", __LINE__, __func__);
+                            AML_PRINT(AML_DBG_MODULES_UTILS, "*************%s:%d, malloc amsdu dynabuf failed****************\n", __func__, __LINE__);
                             break;
                         }
                         frm = (unsigned char *)sw_txhdr->skb->data + sizeof(struct aml_txhdr);
@@ -1355,28 +1387,75 @@ int aml_tx_task(void *data)
                         aml_hw->g_tx_param.mpdu_num++;
                         dynabuf_id = (dynabuf_id + 1) % 256;
                     }
+#else
+
+                    frm = (unsigned char *)sw_txhdr->skb->data + sizeof(struct aml_txhdr);
+                    memcpy(frm + TXDESC_OFFSET, txdesc_host, sizeof(*txdesc_host));
+                    aml_hw->g_tx_param.scat_req->scat_list[aml_hw->g_tx_param.mpdu_num].len = sw_txhdr->frame_len + SDIO_TXHEADER_LEN  + SDIO_FRAME_TAIL_LEN;
+                    aml_hw->g_tx_param.scat_req->scat_list[aml_hw->g_tx_param.mpdu_num].page_num = 1; //a packet consume one page mostly
+                    aml_hw->g_tx_param.scat_req->scat_list[aml_hw->g_tx_param.mpdu_num].packet = frm;
+                    aml_hw->g_tx_param.scat_req->scat_count++;
+                    aml_hw->g_tx_param.scat_req->len += aml_hw->g_tx_param.scat_req->scat_list[aml_hw->g_tx_param.mpdu_num].len;
+                    //AML_PRINT(AML_DBG_MODULES_UTILS, "%s, skb=%p, hostid=%x\n",  __func__, sw_txhdr->skb, txdesc_host->api.host.hostid);
+                    //AML_PRINT(AML_DBG_MODULES_UTILS, "frame_len=%x,len=%x, scat_count=%x, hostid=%x, Reserve=%x\n", sw_txhdr->frame_len,scat_req->scat_list[mpdu_num].len, scat_req->scat_count, tx_option->hostid, tx_option->Reserve);
+                    aml_hw->g_tx_param.mpdu_num++;
+                    #ifdef CONFIG_AML_AMSDUS_TX
+                    if (txdesc_host->api.host.flags & TXU_CNTRL_AMSDU) {
+                        struct aml_amsdu_txhdr *amsdu_txhdr, *tmp;
+                        list_for_each_entry_safe(amsdu_txhdr, tmp, &sw_txhdr->amsdu.hdrs, list) {
+                            msdu_len = amsdu_txhdr->msdu_len + sizeof(struct ethhdr) + amsdu_txhdr->pad;
+                            frm = (unsigned char *)amsdu_txhdr->skb->data + sizeof(*amsdu_txhdr) + sizeof(struct ethhdr);
+                            page_num = 1;
+                            aml_hw->g_tx_param.scat_req->scat_list[aml_hw->g_tx_param.mpdu_num].len = msdu_len + 4;
+                            aml_hw->g_tx_param.scat_req->scat_list[aml_hw->g_tx_param.mpdu_num].page_num = page_num;
+
+                            aml_hw->g_tx_param.scat_req->scat_list[aml_hw->g_tx_param.mpdu_num].packet = frm;
+                            aml_hw->g_tx_param.scat_req->scat_count++;
+                            aml_hw->g_tx_param.scat_req->len += aml_hw->g_tx_param.scat_req->scat_list[aml_hw->g_tx_param.mpdu_num].len;
+                            aml_hw->g_tx_param.mpdu_num++;
+                        }
+                    }
+                    #endif
+
+#endif
                 } else {
 #ifdef CONFIG_AML_USB_LARGE_PAGE
                     frm = (unsigned char *)sw_txhdr->skb->data + sizeof(struct aml_txhdr);
                     memcpy(frm, txdesc_host, sizeof(*txdesc_host));
                     amsdu_len = sw_txhdr->frame_len + sizeof(struct txdesc_host);
                     if (sw_txhdr->desc.api.host.flags & TXU_CNTRL_AMSDU) {
-                        amsdu_dynabuf[dynabuf_id] = kzalloc(USB_AMSDU_BUF_LEN, GFP_ATOMIC);
-                        memcpy(amsdu_dynabuf[dynabuf_id], frm, amsdu_len);
-
                         struct aml_amsdu_txhdr *amsdu_txhdr, *tmp;
-                        list_for_each_entry_safe(amsdu_txhdr, tmp, &sw_txhdr->amsdu.hdrs, list) {
-                            msdu_len = amsdu_txhdr->msdu_len + 14 + amsdu_txhdr->pad;
-                            frm = (unsigned char *)amsdu_txhdr->skb->data + sizeof(*amsdu_txhdr) + sizeof(struct ethhdr);
-                            memcpy(amsdu_dynabuf[dynabuf_id] + amsdu_len, frm, msdu_len);
-                            amsdu_len += msdu_len;
+
+                        txamsdu = aml_get_free_tx_amsdu_buf(aml_hw);
+                        if (txamsdu != NULL) {
+                            memset(txamsdu->amsdu_buf, 0, AMSDU_BUF_MAX);
+                            memcpy(txamsdu->amsdu_buf, frm, amsdu_len);
+                            list_for_each_entry_safe(amsdu_txhdr, tmp, &sw_txhdr->amsdu.hdrs, list) {
+                                msdu_len = amsdu_txhdr->msdu_len + 14 + amsdu_txhdr->pad;
+                                frm = amsdu_txhdr->skb->data + sizeof(*amsdu_txhdr) + sizeof(struct ethhdr);
+                                memcpy(txamsdu->amsdu_buf + amsdu_len, frm, msdu_len);
+                                amsdu_len += msdu_len;
+                            }
+                            aml_hw->g_tx_param.scat_req->scat_list[aml_hw->g_tx_param.mpdu_num].packet = txamsdu->amsdu_buf;
+                        } else {
+                            amsdu_dynabuf[dynabuf_id] = kzalloc(USB_AMSDU_BUF_LEN, GFP_ATOMIC);
+                            memcpy(amsdu_dynabuf[dynabuf_id], frm, amsdu_len);
+
+                            list_for_each_entry_safe(amsdu_txhdr, tmp, &sw_txhdr->amsdu.hdrs, list) {
+                                msdu_len = amsdu_txhdr->msdu_len + 14 + amsdu_txhdr->pad;
+                                frm = (unsigned char *)amsdu_txhdr->skb->data + sizeof(*amsdu_txhdr) + sizeof(struct ethhdr);
+                                memcpy(amsdu_dynabuf[dynabuf_id] + amsdu_len, frm, msdu_len);
+                                amsdu_len += msdu_len;
+                            }
+                            aml_hw->g_tx_param.scat_req->scat_list[aml_hw->g_tx_param.mpdu_num].packet = amsdu_dynabuf[dynabuf_id];
+                            dynabuf_id = (dynabuf_id + 1) % 256;
                         }
-                        aml_hw->g_tx_param.scat_req->scat_list[aml_hw->g_tx_param.mpdu_num].packet = amsdu_dynabuf[dynabuf_id];
-                        dynabuf_id = (dynabuf_id + 1) % 256;
                     } else {
                         aml_hw->g_tx_param.scat_req->scat_list[aml_hw->g_tx_param.mpdu_num].packet = frm;
                     }
 
+                    if (amsdu_len > USB_PAGE_LEN)
+                        AML_INFO("amsdu_len exceeding buf size, amsdu_len:%d\n", amsdu_len);
                     aml_hw->g_tx_param.scat_req->scat_list[aml_hw->g_tx_param.mpdu_num].len = ALIGN(amsdu_len, 4);
                     aml_hw->g_tx_param.scat_req->scat_list[aml_hw->g_tx_param.mpdu_num].page_num = 1; //a packet consume one page mostly
                     aml_hw->g_tx_param.scat_req->scat_count++;
@@ -1459,13 +1538,14 @@ int aml_tx_task(void *data)
 
             if (aml_bus_type == SDIO_MODE) {
                 aml_hw->plat->hif_sdio_ops->hi_send_frame(aml_hw->g_tx_param.scat_req);
+                #if 0
                 for (i = 0; i < dynabuf_id; i++) {
                     if (amsdu_dynabuf[i]) {
                         kfree(amsdu_dynabuf[i]);
                     }
                 }
-                aml_set_free_tx_amsdu_buf(aml_hw);
                 dynabuf_id = 0;
+                #endif
             } else {
                 aml_hw->plat->hif_ops->hi_send_frame(aml_hw->g_tx_param.scat_req);
                 #ifdef CONFIG_AML_USB_LARGE_PAGE
@@ -1478,6 +1558,7 @@ int aml_tx_task(void *data)
                 #endif
             }
 
+            aml_set_free_tx_amsdu_buf(aml_hw);
             aml_hw->g_tx_param.mpdu_num = 0;
             aml_hw->g_tx_param.tot_page_num = 0;
         }
@@ -1485,7 +1566,11 @@ int aml_tx_task(void *data)
     vfree(amsdu_dynabuf);
     if (aml_hw->aml_tx_completion_init) {
         aml_hw->aml_tx_completion_init = 0;
+#if LINUX_VERSION_CODE <= KERNEL_VERSION(5, 16, 20)
         complete_and_exit(&aml_hw->aml_tx_completion, 0);
+#else
+        complete(&aml_hw->aml_tx_completion);
+#endif
     }
 
     return 0;
@@ -1759,6 +1844,91 @@ static u8 aml_msg_process(struct aml_hw *aml_hw, struct ipc_e2a_msg *msg, struct
     return ret;
 }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0)
+void aml_traffic_busy_msg(struct aml_hw *aml_hw,struct ipc_e2a_msg *msg1,struct ipc_e2a_msg *msg2)
+{
+    struct traffic_busy *host_cpu1 = NULL;
+    struct traffic_busy *host_cpu2 = NULL;
+    struct traffic_busy *msg_param = NULL;
+    u32 msgcnt = 0;
+    struct aml_vif *aml_vif;
+
+    if (aml_bus_type == PCIE_MODE) {
+        if (msg1->pattern == IPC_MSGE2A_VALID_PATTERN) {
+            msgcnt = ((msg1->dummy_src_id << 16) | msg1->dummy_dest_id);
+            if (msgcnt != aml_hw->ipc_env->msgbuf_cnt + 1) {
+                printk("error:fw msg cnt[%u],host last msg cnt[%u],msg id=0x%x,msgidx=%d\n",msgcnt,aml_hw->ipc_env->msgbuf_cnt,msg1->id,aml_hw->ipc_env->msgbuf_idx);
+                return ;
+            }
+            if (msg1->id == PRIV_TRAFFIC_BUSY_IND) {
+                msg_param = (struct traffic_busy *) msg1->param;
+                if (msg_param->td_flag == TRAFFIC_CPU_FLAG) {
+                    host_cpu1 = (struct traffic_busy *)msg1->param;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)
+                    if (host_cpu1->traffic_busy_flag) {
+                        aml_cpufreq_boost_update(aml_hw);
+                    } else {
+                        aml_cpufreq_boost_remove(aml_hw);
+                    }
+#endif
+                } else if (msg_param->td_flag == TRAFFIC_SCAN_FLAG) {
+                    /*tx or rx has traffic*/
+                    if (msg_param->traffic_busy_flag == 1)
+                        aml_hw->traffic_busy = 1;
+                    else
+                        aml_hw->traffic_busy = 0;
+                }
+            }
+        }
+    } else {
+        if (msg1->pattern == IPC_MSGE2A_VALID_PATTERN) {
+            host_cpu1 = (struct traffic_busy *)msg1->param;
+
+            if (msg1->id == PRIV_TRAFFIC_BUSY_IND) {
+                msg_param = (struct traffic_busy *) msg1->param;
+                if (msg_param->td_flag == TRAFFIC_CPU_FLAG) {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)
+                    if (host_cpu1->traffic_busy_flag) {
+                        aml_cpufreq_boost_update(aml_hw);
+                    } else {
+                        aml_cpufreq_boost_remove(aml_hw);
+                    }
+#endif
+                } else if (msg_param->td_flag == TRAFFIC_SCAN_FLAG) {
+                    /*tx or rx has traffic*/
+                    if (msg_param->traffic_busy_flag == 1)
+                        aml_hw->traffic_busy = 1;
+                    else
+                        aml_hw->traffic_busy = 0;
+                }
+            }
+        }
+        if (msg2->pattern == IPC_MSGE2A_VALID_PATTERN) {
+            host_cpu2 = (struct traffic_busy *)msg2->param;
+
+            if (msg2->id == PRIV_TRAFFIC_BUSY_IND) {
+                msg_param = (struct traffic_busy *) msg2->param;
+                if (msg_param->td_flag == TRAFFIC_CPU_FLAG) {
+                    printk("traffic busy msg debug:host_cpu2->traffic_busy_flag %d\n",host_cpu2->traffic_busy_flag);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)
+                    if (host_cpu2->traffic_busy_flag)
+                        aml_cpufreq_boost_update(aml_hw);
+                    else
+                        aml_cpufreq_boost_remove(aml_hw);
+#endif
+                } else if (msg_param->td_flag == TRAFFIC_SCAN_FLAG) {
+                    /*tx or rx has traffic*/
+                    if (msg_param->traffic_busy_flag == 1)
+                        aml_hw->traffic_busy = 1;
+                    else
+                        aml_hw->traffic_busy = 0;
+                }
+            }
+        }
+    }
+    return;
+}
+#endif
 
 /**
  * aml_msgind() - IRQ handler callback for %IPC_IRQ_E2A_MSG
@@ -1806,6 +1976,10 @@ static u8 aml_msgind(void *pthis, void *arg)
     } else {
         msg1 = buf->addr;
     }
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)
+    aml_traffic_busy_msg(aml_hw,msg1,msg2);
+#endif
 
 #ifdef CONFIG_LINUXPC_VERSION
     {
@@ -2109,7 +2283,7 @@ void aml_get_proc_rxbuff(struct net_device *dev)
 #endif
 
 static unsigned int flag_end = 0;
-int aml_traceind(void *pthis, int mode)
+int aml_traceind(void *pthis)
 {
     struct aml_hw *aml_hw = (struct aml_hw *)pthis;
     unsigned int end = 0;
@@ -2117,6 +2291,12 @@ int aml_traceind(void *pthis, int mode)
     uint16_t *ptr_flag = NULL;
     int ret = 0;
     int loop_flag = 0;
+
+    if (atomic_read(&g_wifi_pm.bus_suspend_cnt) || atomic_read(&g_wifi_pm.is_shut_down)
+        || bus_state_detect.bus_err) {
+        AML_INFO("bus no ready!");
+        return 0;
+    }
 
 #ifdef CONFIG_AML_DEBUGFS
     mutex_lock(&trace_log_file_info.mutex);
@@ -2127,12 +2307,13 @@ int aml_traceind(void *pthis, int mode)
     ptr_flag = trace_log_file_info.ptr;
 #endif
     if (aml_bus_type == USB_MODE) {
-        aml_hw->plat->hif_ops->hi_read_sram((unsigned char *)ptr_flag, (unsigned char *)(SYS_TYPE)USB_TRACE_START_ADDR, TRACE_TOTAL_SIZE, USB_EP4);
-        end = aml_hw->plat->hif_ops->hi_read_word((unsigned long)&(aml_hw->ipc_env->shared->trace_end), USB_EP4);
+        aml_hw->plat->hif_ops->hi_read_sram((unsigned char *)ptr_flag, (unsigned char *)(SYS_TYPE)TRACE_USB_DCCM_END_ADDR, TRACE_TOTAL_SIZE, USB_EP4);
     } else if (aml_bus_type == SDIO_MODE) {
-        aml_hw->plat->hif_sdio_ops->hi_random_ram_read((unsigned char *)ptr_flag, (unsigned char *)(SYS_TYPE)SDIO_TRACE_START_ADDR,TRACE_TOTAL_SIZE);
-        end = aml_hw->plat->hif_sdio_ops->hi_random_word_read((unsigned long)&(aml_hw->ipc_env->shared->trace_end));
+        aml_hw->plat->hif_sdio_ops->hi_random_ram_read((unsigned char *)ptr_flag, (unsigned char *)(SYS_TYPE)TRACE_SRAM_END_ADDR,TRACE_TOTAL_SIZE + 4);
     }
+
+    memcpy(&end, ptr_flag, sizeof(end));
+    ptr_flag += 2;
 
     while (end != flag_end) {
         if (end < flag_end) {

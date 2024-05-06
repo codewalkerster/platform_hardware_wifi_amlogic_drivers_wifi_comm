@@ -11,39 +11,83 @@
 #include "aml_defs.h"
 #include "ipc_host.h"
 #include "aml_prof.h"
+#include "aml_irqs.h"
+#include "wifi_top_addr.h"
 
+unsigned int sdio_irq_done = 1;
 extern struct aml_pm_type g_wifi_pm;
 extern struct aml_bus_state_detect bus_state_detect;
+
+void aml_enable_sdio_irq(struct aml_hw *aml_hw)
+{
+    uint32_t en_irq = 0;
+
+    sdio_irq_done = 1;
+    en_irq |= BIT(31);
+    //set bit31 to 0xa07064 enable sdio irq
+    aml_hw->plat->hif_sdio_ops->hi_random_word_write(RG_WIFI_IF_FW2HST_CLR, en_irq);
+
+    return;
+}
+
+void aml_disable_sdio_irq(struct aml_hw *aml_hw)
+{
+    unsigned int reg_data[2] = {0};
+
+    //read 0xa0706c for sdio irq disable
+    aml_hw->plat->hif_sdio_ops->hi_desc_read((unsigned char *)(unsigned long)reg_data,
+            (unsigned char *)(unsigned long)RG_WIFI_IF_FW2HST_IRQ_CFG , sizeof(reg_data));
+
+    return;
+}
+
 void aml_irq_usb_hdlr(struct urb *urb)
 {
     struct aml_hw *aml_hw = (struct aml_hw *)(urb->context);
 
     if (atomic_read(&g_wifi_pm.bus_suspend_cnt) || atomic_read(&g_wifi_pm.is_shut_down))
     {
-        return ;
+        return;
     }
     urb->status = 0;
     up(&aml_hw->aml_irq_sem);
-    return ;
+    return;
 }
 
 irqreturn_t aml_irq_sdio_hdlr(int irq, void *dev_id)
 {
+    struct aml_hw *aml_hw = (struct aml_hw *)dev_id;
+
     if (atomic_read(&g_wifi_pm.bus_suspend_cnt) || atomic_read(&g_wifi_pm.is_shut_down))
     {
         return IRQ_HANDLED;
     }
 
-    struct aml_hw *aml_hw = (struct aml_hw *)dev_id;
-    disable_irq_nosync(irq);
-    up(&aml_hw->aml_irq_sem);
+    if (sdio_irq_done)
+    {
+        sdio_irq_done = 0;
+        up(&aml_hw->aml_irq_sem);
+    }
     return IRQ_HANDLED;
 }
+
 
 void aml_irq_sdio_hdlr_for_pt(struct sdio_func *func)
 {
     struct aml_hw *aml_hw = dev_get_drvdata(&func->dev);
-    up(&aml_hw->aml_irq_sem);
+
+    if (atomic_read(&g_wifi_pm.bus_suspend_cnt) || atomic_read(&g_wifi_pm.is_shut_down))
+    {
+        return;
+    }
+
+    if (sdio_irq_done)
+    {
+        sdio_irq_done = 0;
+        up(&aml_hw->aml_irq_sem);
+    }
+
+    return;
 }
 
 int aml_irq_task(void *data)
@@ -62,7 +106,7 @@ int aml_irq_task(void *data)
         /* wait for work */
         if (down_interruptible(&aml_hw->aml_irq_sem) != 0) {
             /* interrupted, exit */
-            AML_PRINT(AML_DBG_MODULES_TX, "%s:%d wait aml_task_sem fail!\n", __func__, __LINE__);
+            AML_PRINT(AML_DBG_MODULES_IRQ, "wait aml_task_sem fail!\n");
             break;
         }
 
@@ -88,15 +132,14 @@ int aml_irq_task(void *data)
         spin_unlock_bh(&aml_hw->tx_lock);
 
         if (aml_bus_type == SDIO_MODE) {
-#ifndef CONFIG_PT_MODE
-             enable_irq(aml_hw->irq);
-#endif
+            aml_enable_sdio_irq(aml_hw);
+
         } else if ((aml_bus_type == USB_MODE)
 #ifdef CONFIG_AML_RECOVERY
         && !bus_state_detect.bus_err
 #endif
         ) {
-            usleep_range(20, 30);
+            //usleep_range(20, 30);
             USB_BEGIN_LOCK();
             if ((atomic_read(&g_wifi_pm.bus_suspend_cnt) == 0) && (atomic_read(&g_wifi_pm.is_shut_down) == 0) &&
                 (atomic_read(&g_wifi_pm.drv_suspend_cnt) == 0)) {
@@ -130,7 +173,11 @@ int aml_irq_task(void *data)
     }
     if (aml_hw->aml_irq_completion_init) {
         aml_hw->aml_irq_completion_init = 0;
+#if LINUX_VERSION_CODE <= KERNEL_VERSION(5, 16, 20)
         complete_and_exit(&aml_hw->aml_irq_completion, 0);
+#else
+        complete(&aml_hw->aml_irq_completion);
+#endif
     }
 
     return 0;

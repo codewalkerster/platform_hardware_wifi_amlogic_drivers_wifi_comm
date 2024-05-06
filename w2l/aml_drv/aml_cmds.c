@@ -82,7 +82,7 @@ int aml_msg_task(void *data)
     struct aml_cmd *cmd = NULL;
     struct sched_param sch_param;
 
-    sch_param.sched_priority = 90;
+    sch_param.sched_priority = 91;
 #ifndef CONFIG_PT_MODE
     sched_setscheduler(current, SCHED_RR, &sch_param);
 #endif
@@ -112,12 +112,19 @@ int aml_msg_task(void *data)
 
             trace_msg_send(cmd->id);
             aml_ipc_msg_push(aml_hw, cmd, AML_CMD_A2EMSG_LEN(cmd->a2e_msg));
-            kfree(cmd->a2e_msg);
+            spin_lock_bh(&cmd_mgr->lock);
+            if (cmd->a2e_msg)
+                kfree(cmd->a2e_msg);
+            spin_unlock_bh(&cmd_mgr->lock);
         }
     }
     if (aml_hw->aml_msg_completion_init) {
         aml_hw->aml_msg_completion_init = 0;
-    complete_and_exit(&aml_hw->aml_msg_completion, 0);
+#if LINUX_VERSION_CODE <= KERNEL_VERSION(5, 16, 20)
+        complete_and_exit(&aml_hw->aml_msg_completion, 0);
+#else
+        complete(&aml_hw->aml_msg_completion);
+#endif
     }
 
     return 0;
@@ -174,8 +181,7 @@ static int cmd_mgr_queue(struct aml_cmd_mgr *cmd_mgr, struct aml_cmd *cmd)
             return -ENOMEM;
         }
         last = list_entry(cmd_mgr->cmds.prev, struct aml_cmd, list);
-        if ((last->flags & (AML_CMD_FLAG_WAIT_ACK | AML_CMD_FLAG_WAIT_PUSH))
-            || ((aml_bus_type == PCIE_MODE) && (last->flags & AML_CMD_FLAG_WAIT_CFM))) {
+        if (last->flags & (AML_CMD_FLAG_WAIT_ACK | AML_CMD_FLAG_WAIT_PUSH | AML_CMD_FLAG_WAIT_CFM)) {
 #if 0 // queue even NONBLOCK command.
             if (cmd->flags & AML_CMD_FLAG_NONBLOCK) {
                 AML_PRINT(AML_DBG_MODULES_CMD, KERN_CRIT"cmd queue busy\n");
@@ -328,7 +334,8 @@ static int cmd_mgr_llind(struct aml_cmd_mgr *cmd_mgr, struct aml_cmd *cmd)
 
     if (next) {
         if (aml_bus_type != PCIE_MODE) {
-            up(&aml_hw->aml_msg_sem);
+            if (!defer_push)
+                up(&aml_hw->aml_msg_sem);
         } else {
             if (!defer_push) {
                 next->flags &= ~AML_CMD_FLAG_WAIT_PUSH;
@@ -410,6 +417,12 @@ static int cmd_mgr_msgind(struct aml_cmd_mgr *cmd_mgr, struct aml_cmd_e2amsg *ms
             aml_ipc_msg_push(aml_hw, next, AML_CMD_A2EMSG_LEN(next->a2e_msg));
             kfree(next->a2e_msg);
         }
+    } else {
+        if (found && (next != NULL) && (next->flags & AML_CMD_FLAG_WAIT_PUSH)) {
+            CMD_PRINT(next);
+            AML_INFO("next len 0x%x, queue sz %d \n", AML_CMD_A2EMSG_LEN(next->a2e_msg), cmd_mgr->queue_sz);
+            up(&aml_hw->aml_msg_sem);
+        }
     }
     aml_spin_unlock(&cmd_mgr->lock);
 
@@ -457,7 +470,9 @@ static void cmd_mgr_drain(struct aml_cmd_mgr *cmd_mgr)
             complete(&cur->complete);
 
         if (cur->flags & AML_CMD_FLAG_WAIT_PUSH) {
-            kfree(cur->a2e_msg);
+            if (cur->a2e_msg)
+                kfree(cur->a2e_msg);
+
             kfree(cur);
         }
     }

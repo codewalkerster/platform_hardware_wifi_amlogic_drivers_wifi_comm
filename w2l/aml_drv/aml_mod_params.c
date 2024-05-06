@@ -642,14 +642,14 @@ static int aml_check_fw_hw_feature(struct aml_hw *aml_hw,
                PRINT_AML_FEAT(FAKE_FTM_RSP));
 #undef PRINT_AML_FEAT
 
-    if (max_sta_nb != NX_REMOTE_STA_MAX)
+    if(max_sta_nb != NX_REMOTE_STA_MAX)
     {
         wiphy_err(wiphy, "Different number of supported stations between driver and FW (%d != %d)\n",
                   NX_REMOTE_STA_MAX, max_sta_nb);
         res = -1;
     }
 
-    if (max_vif_nb != NX_VIRT_DEV_MAX)
+    if(max_vif_nb != NX_VIRT_DEV_MAX)
     {
         wiphy_err(wiphy, "Different number of supported virtual interfaces between driver and FW (%d != %d)\n",
                   NX_VIRT_DEV_MAX, max_vif_nb);
@@ -704,7 +704,7 @@ static void aml_set_ppe_threshold(struct aml_hw *aml_hw,
     ppe_thres_field->nsts = nss - 1;
     for (i = 0; i < nss ; i++)
     {
-        for (j = 0; j < cnt; j++) {
+        for (j = 0; j < cnt; j++){
             offset = (i * cnt + j) * PPE_THRES_INFO_BIT_LEN + PPE_THRES_INFO_OFT;
             ppe_thres_ptr = (u16_l*)&he_cap->ppe_thres[offset / 8];
             *ppe_thres_ptr |= *ppe_thres_info_ptr << (offset % 8);
@@ -978,7 +978,11 @@ void aml_set_he_capa(struct aml_hw *aml_hw, struct wiphy *wiphy)
                                            dcm_max_ru;
     he_cap->he_cap_elem.phy_cap_info[9] |= IEEE80211_HE_PHY_CAP9_RX_FULL_BW_SU_USING_MU_WITH_COMP_SIGB |
                                            IEEE80211_HE_PHY_CAP9_RX_FULL_BW_SU_USING_MU_WITH_NON_COMP_SIGB |
+                                           #if LINUX_VERSION_CODE < KERNEL_VERSION(5, 17, 0)
                                            IEEE80211_HE_PHY_CAP9_NOMIMAL_PKT_PADDING_16US;
+                                           #else
+                                           IEEE80211_HE_PHY_CAP9_NOMINAL_PKT_PADDING_16US;
+                                           #endif
 
     // Starting from version v31 more HE_ER_SU modulations is supported
     if (__MDM_VERSION(phy_vers) > 30) {
@@ -1115,8 +1119,8 @@ static void aml_set_rf_params(struct aml_hw *aml_hw, struct wiphy *wiphy)
     } else if (mdm_phy_cfg == MDM_PHY_CONFIG_KARST) {
         // We use the NSS parameter as is
         // Retrieve the Karst configuration
-        aml_cfg_parse_phy(aml_hw, AML_PHY_CONFIG_KARST_NAME,
-                                  &phy_conf, aml_hw->mod_params->phy_cfg);
+        //aml_cfg_parse_phy(aml_hw, AML_PHY_CONFIG_KARST_NAME,
+        //                          &phy_conf, aml_hw->mod_params->phy_cfg);
 
         memcpy(&aml_hw->phy.cfg, &phy_conf.karst, sizeof(phy_conf.karst));
     } else {
@@ -1193,7 +1197,11 @@ void aml_custregd(struct aml_hw *aml_hw, struct wiphy *wiphy)
     if (!aml_hw->mod_params->custregd)
         return;
 
+#if LINUX_VERSION_CODE <= KERNEL_VERSION(6, 3, 12)
     wiphy->regulatory_flags |= REGULATORY_IGNORE_STALE_KICKOFF;
+#else
+    wiphy->regulatory_flags |= (REGULATORY_WIPHY_SELF_MANAGED >> 1);
+#endif
     wiphy->regulatory_flags |= REGULATORY_WIPHY_SELF_MANAGED;
 
     rtnl_lock();

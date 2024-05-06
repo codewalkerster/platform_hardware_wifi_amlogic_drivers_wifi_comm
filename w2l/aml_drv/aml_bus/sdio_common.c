@@ -42,11 +42,27 @@ int (*host_resume_req)(struct device *device);
 extern void extern_wifi_set_enable(int is_on);
 extern void aml_sdio_random_word_write(unsigned int addr, unsigned int data);
 extern unsigned int aml_sdio_random_word_read(unsigned int addr);
+extern struct aml_pm_type g_wifi_pm;
 
 struct sdio_func *aml_priv_to_func(int func_n)
 {
     ASSERT(func_n >= 0 &&  func_n < SDIO_FUNCNUM_MAX);
     return g_hwif_sdio.sdio_func_if[func_n];
+}
+
+bool aml_sdio_block_bus_opt(unsigned char func_num, int addr)
+{
+    if ((atomic_read(&g_wifi_pm.is_shut_down) == 1) || ((atomic_read(&g_wifi_pm.bus_suspend_cnt)) == 1))
+    {
+       ERROR_DEBUG_OUT("fw shutdown(%d),bus suspend(%d) , do not read/write now!\n",
+           atomic_read(&g_wifi_pm.is_shut_down),atomic_read(&g_wifi_pm.bus_suspend_cnt));
+       ERROR_DEBUG_OUT("func_num(%d),addr(%d) \n",func_num, addr);
+       return true;
+    }
+    else
+    {
+       return false;
+    }
 }
 
 int aml_sdio_suspend(unsigned int suspend_enable)
@@ -438,6 +454,9 @@ int aml_sdio_insmod(void)
 
 void aml_sdio_rmmod(void)
 {
+    if (g_wifi_in_insmod)
+        return;
+
     aml_sdio_exit();
     g_hif_sdio_ops.hi_cleanup_scat(&g_hwif_sdio);
     wifi_drv_rmmod_ongoing = 0;
@@ -458,3 +477,4 @@ EXPORT_SYMBOL(host_wake_req);
 EXPORT_SYMBOL(host_suspend_req);
 EXPORT_SYMBOL(host_resume_req);
 EXPORT_SYMBOL(aml_priv_to_func);
+EXPORT_SYMBOL(aml_sdio_block_bus_opt);

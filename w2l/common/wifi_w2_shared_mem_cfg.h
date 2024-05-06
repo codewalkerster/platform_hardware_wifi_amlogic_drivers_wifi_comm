@@ -15,7 +15,7 @@ LA OFF: rx buffer large size 0x40000, small size: 0x10000;
 LA ON: rx buffer large size 0x30000, small size: 0x20000
 */
 #define RXBUF_START_ADDR                 (0x60013b4c)
-#define RXBUF_END_ADDR_SMALL             (0x6001e000) /*rx buf size: (0xA4B4)*/
+#define RXBUF_END_ADDR_SMALL             (0x6001c000) /*rx buf size: (0xA4B4)*/
 #define RXBUF_END_ADDR_LARGE             (0x60053b4c) /*rx buf size: (256K)*/
 
 #define TXBUF_START_ADDR                 (RXBUF_END_ADDR_SMALL)
@@ -40,6 +40,12 @@ LA ON: rx buffer large size 0x30000, small size: 0x20000
 /* sdio trace use sram 27K size */
 #define SDIO_TRACE_START_ADDR            (0xa10800)  /* trace size: 0x6800 */
 #define SDIO_TRACE_END_ADDR              (0xa17000)
+
+#define TRACE_SRAM_START_ADDR             (0xa107f8)
+#define TRACE_SRAM_END_ADDR               (0xa107fc)
+
+#define TRACE_USB_DCCM_START_ADDR         (0x00d277f8)
+#define TRACE_USB_DCCM_END_ADDR           (0x00d277fc)
 
 #define TRACE_TOTAL_SIZE    (0x6800)
 #define TRACE_MAX_SIZE      (TRACE_TOTAL_SIZE >> 1) /* trace max size is total size 1/2 */

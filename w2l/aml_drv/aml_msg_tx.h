@@ -15,8 +15,17 @@
 
 #include "aml_defs.h"
 
+#define TRACE_ENABLE_BIT_FLAG               BIT(0)
+#define TRACE_TIMEOUT_TIMER_INIT_BIT_FLAG   BIT(1)
+#define TRACE_TIMEOUT_FORCE_READ_BIT_FLAG   BIT(2)
+
+#define AML_SYNC_TRACE_MON_INTERVAL        (60 * HZ)
+#define AML_SYNC_FW_TRACE_TIME_INTERVAL    (15 * HZ)
+
 extern unsigned char g_pci_shutdown;
 extern unsigned char g_pci_msg_suspend;
+extern uint32_t g_trace_ts;
+
 int aml_send_reset(struct aml_hw *aml_hw);
 int aml_send_start(struct aml_hw *aml_hw);
 int aml_send_version_req(struct aml_hw *aml_hw, struct mm_version_cfm *cfm);
@@ -236,6 +245,9 @@ int aml_send_extcapab_req(struct aml_hw *aml_hw);
 
 int aml_sync_trace_init(struct aml_hw *aml_hw);
 int aml_sync_trace_deinit(struct aml_hw *aml_hw);
+int aml_detection_trace_init(struct aml_hw *aml_hw);
+int aml_detection_trace_deinit(struct aml_hw *aml_hw);
+
 int aml_set_limit_power(struct aml_hw *aml_hw, int limit_power_switch);
 int aml_txq_unexpection(struct net_device *dev);
 void cfg80211_to_aml_chan(const struct cfg80211_chan_def *chandef, struct mac_chan_op *chan);

@@ -9,6 +9,8 @@
 #include "chip_intf_reg.h"
 #include "aml_interface.h"
 #include "wifi_debug.h"
+#include "chip_bt_pmu_reg.h"
+
 
 struct auc_hif_ops g_auc_hif_ops;
 struct usb_device *g_udev = NULL;
@@ -68,6 +70,22 @@ static int auc_suspend(struct usb_interface *interface,pm_message_t state)
 {
     int cnt = 0;
 
+	//bt open
+	if ((auc_read_word_by_ep_for_bt(RG_BT_PMU_A16, USB_EP1) & BIT(31)))
+	{
+		//bt drv suspend set bit26
+		while (!(auc_read_word_by_ep_for_bt(RG_AON_A52, USB_EP1) & BIT(26)))
+		{
+			msleep(50);
+			cnt++;
+			if (cnt > 40)
+			{
+				PRINT("bt drv suspend fail \n");
+				return -1;
+			}
+		}
+	}
+	
     if (atomic_read(&g_wifi_pm.wifi_enable))
     {
         while (atomic_read(&g_wifi_pm.drv_suspend_cnt) == 0)

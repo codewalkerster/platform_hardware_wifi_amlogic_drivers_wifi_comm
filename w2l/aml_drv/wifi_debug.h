@@ -28,6 +28,7 @@ enum
     AML_DBG_MODULES_USB = BIT(15),    /* usb */
     AML_DBG_MODULES_UTILS = BIT(16),    /* utils */
     AML_DBG_MODULES_CSI = BIT(17),    /* csi */
+    AML_DBG_MODULES_IRQ = BIT(18),    /* irq */
 };
 
 enum

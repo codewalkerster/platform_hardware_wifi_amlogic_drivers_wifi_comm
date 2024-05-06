@@ -107,6 +107,29 @@ static void aml_wq_doit(struct work_struct *work)
                 aml_alloc_global_rx_rate(aml_hw, aml_wq);
                 break;
 #endif
+            case AML_WQ_HOST_GET_TRACE:
+                /* fw trace log 30s is not updated, host force get trace now */
+                AML_INFO(">>>No new fw trace received, host force get trace now.");
+                aml_traceind(aml_hw->ipc_env->pthis);
+                break;
+            case AML_WQ_HOST_SET_REGDOM:
+                aml_do_set_regdom(aml_hw, aml_wq);
+                break;
+            case AML_WQ_CANCEL_SCAN:
+                if (aml_hw->scan_request) {
+                    int error;
+                    struct aml_vif *vif = aml_wq->aml_vif ;
+                    AML_INFO("action rx cancel scan, vif:%d\n",vif->vif_index);
+                    error = aml_cancel_scan(aml_hw, vif);
+                    if (error) {
+                        AML_INFO("cancel scan fail:error = %d\n",error);
+                    }
+                    aml_set_scan_hang(vif, 0, __func__, __LINE__);
+                }
+                break;
+            case AML_WQ_IPV6:
+                aml_send_notify_ip(aml_wq->aml_vif, IPV6_VER, aml_wq->data);
+                break;
             default:
                 AML_INFO("wq type(%d) unknown", aml_wq->id);
                 break;

@@ -40,7 +40,7 @@
 #define RX_RPD_DATASTARTPTR            (RX_DESC_SIZE + 8)
 
 #define AML_WRAP CO_BIT(31)
-#define RX_DATA_MAX_CNT 512
+#define RX_DATA_MAX_CNT (512 + 128)
 
 #define RX_HOSTID_OFFSET 36
 #define RX_REORDER_LEN_OFFSET 40
@@ -56,7 +56,7 @@
 #define RX_PD_LEN                      (0)
 #define RX_PAYLOAD_OFFSET              (RX_DESC_SIZE + RX_PD_LEN)
 #define AML_WRAP CO_BIT(31)
-#define RX_DATA_MAX_CNT 512
+#define RX_DATA_MAX_CNT (512 + 128)
 
 #define RX_HOSTID_OFFSET               (8)
 #define RX_REORDER_LEN_OFFSET          (10)
@@ -69,7 +69,7 @@
 #define RX_PD_LEN                      (20)
 #define RX_PAYLOAD_OFFSET              (RX_DESC_SIZE + RX_PD_LEN)
 #define AML_WRAP CO_BIT(31)
-#define RX_DATA_MAX_CNT 512
+#define RX_DATA_MAX_CNT (512 + 128)
 
 #define RX_HOSTID_OFFSET               (36)
 #define RX_REORDER_LEN_OFFSET          (38)
@@ -275,7 +275,7 @@ struct aml_dyn_snr_cfg {
 #define HW2CPU(ptr) ((void *)(((uint32_t)(ptr)) / CHAR_LEN))
 #define CO_ALIGN4_LO(val) ((val)&~3)
 
-#define RXBUF_SIZE (324 * 1024)
+#define RXBUF_SIZE (340 * 1024)
 #define RXBUF_NUM (WLAN_AML_HW_RX_SIZE / RXBUF_SIZE)
 
 #define TEMP_RXBUF_SIZE (10 * 1024)
@@ -291,6 +291,7 @@ void aml_rxdata_deinit(void);
 void aml_scan_clear_scan_res(struct aml_hw *aml_hw);
 void aml_scan_rx(struct aml_hw *aml_hw, struct hw_rxhdr *hw_rxhdr, struct sk_buff *skb);
 void aml_rxbuf_list_init(struct aml_hw *aml_hw);
+void aml_clear_reorder_list();
 
 #ifndef CONFIG_AML_DEBUGFS
 void aml_dealloc_global_rx_rate(struct aml_hw *aml_hw, struct aml_sta *sta);

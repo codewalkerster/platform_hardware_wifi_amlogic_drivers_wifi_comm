@@ -387,7 +387,9 @@ static inline int aml_rx_remain_on_channel_exp_ind(struct aml_hw *aml_hw,
         return 0;
 
     aml_vif= roc->vif;
+    aml_vif->p2p_negotiation_state = P2P_NOT_IN_NEG;
 
+    aml_tx_cfm_wait_rsp(aml_hw, false, __func__, __LINE__);
     trace_roc_exp(aml_vif->vif_index);
 
     AML_INFO("roc internal=%d, on_chan=%d cookie:0x%llu\n",roc->internal,roc->on_chan,roc);
@@ -560,7 +562,7 @@ static inline int aml_rx_csa_counter_ind(struct aml_hw *aml_hw,
     struct aml_vif *vif;
     bool found = false;
 
-    AML_DBG(AML_FN_ENTRY_STR);
+    AML_INFO("vif:%d, counter:%d", ind->vif_index, ind->csa_count);
 
     // Look for VIF entry
     list_for_each_entry(vif, &aml_hw->vifs, list) {
@@ -634,7 +636,7 @@ static inline int aml_rx_csa_finish_ind(struct aml_hw *aml_hw,
     struct aml_vif *vif;
     bool found = false;
 
-    AML_DBG(AML_FN_ENTRY_STR);
+    AML_INFO("vif:%d, status:%d, chan_idx:%d", ind->vif_index, ind->status, ind->chan_idx);
 
     // Look for VIF entry
     list_for_each_entry(vif, &aml_hw->vifs, list) {
@@ -888,11 +890,11 @@ struct ieee80211_channel *aml_get_bss_channel(struct wiphy *wiphy, const u8 *ie,
     tmp = cfg80211_find_ie(WLAN_EID_DS_PARAMS, ie, ielen);
     if (tmp && tmp[1] == 1) {
         channel_number = tmp[2];
+
     } else {
         tmp = cfg80211_find_ie(WLAN_EID_HT_OPERATION, ie, ielen);
         if (tmp && tmp[1] >= sizeof(struct ieee80211_ht_operation)) {
             struct ieee80211_ht_operation *htop = (void *)(tmp + 2);
-
             channel_number = htop->primary_chan;
         }
     }
@@ -969,7 +971,7 @@ static inline int aml_sdio_rx_scanu_result_ind(struct aml_hw *aml_hw)
                 (aml_hw->scanres_payload_buf + SCAN_RESULTS_MAX_CNT*500) ,mgmt);
             AML_PRINT(AML_DBG_MODULES_MSG_RX, "ind:%08x len:%d\n", ind, ind->length);
             list_del(&scan_res->list);
-            list_add_tail(&scan_res->list, &aml_hw->scan_res_avilable_list);
+            list_add_tail(&scan_res->list, &aml_hw->scan_res_available_list);
             continue;
         }
 
@@ -982,9 +984,12 @@ static inline int aml_sdio_rx_scanu_result_ind(struct aml_hw *aml_hw)
         if (tmp_ret == NULL)
         {
             list_del(&scan_res->list);
-            list_add_tail(&scan_res->list, &aml_hw->scan_res_avilable_list);
+            list_add_tail(&scan_res->list, &aml_hw->scan_res_available_list);
             continue;
         }
+
+        if (tmp_ret->center_freq == 0)
+            tmp_ret->center_freq = ind->center_freq;
 
         /*
         if ((ie[0] == WLAN_EID_SSID) && (ie + 2 + ie[1] < (u8 *) mgmt + ind->length)) {
@@ -1000,7 +1005,7 @@ static inline int aml_sdio_rx_scanu_result_ind(struct aml_hw *aml_hw)
         */
         //AML_DBG(AML_FN_ENTRY_STR);
 
-        chan = ieee80211_get_channel(aml_hw->wiphy, ind->center_freq);
+        chan = ieee80211_get_channel(aml_hw->wiphy, tmp_ret->center_freq);
 
         if (chan != NULL)
         bss = cfg80211_inform_bss_frame(aml_hw->wiphy, chan,
@@ -1011,7 +1016,7 @@ static inline int aml_sdio_rx_scanu_result_ind(struct aml_hw *aml_hw)
         cfg80211_put_bss(aml_hw->wiphy, bss);
 
         list_del(&scan_res->list);
-        list_add_tail(&scan_res->list, &aml_hw->scan_res_avilable_list);
+        list_add_tail(&scan_res->list, &aml_hw->scan_res_available_list);
     }
     spin_unlock_bh(&aml_hw->scan_lock);
 
@@ -1265,13 +1270,16 @@ static inline int aml_rx_sm_connect_ind(struct aml_hw *aml_hw,
     const u8 *req_ie, *rsp_ie;
     const u8 *extcap_ie;
     const struct ieee_types_extcap *extcap;
+    unsigned char ipv4_addr[IPV4_ADDR_LEN] = {0};
+    struct wireless_dev *wdev = dev->ieee80211_ptr;
 
     AML_INFO("vif_idx:%d, status_code:%d, sta_idx:%d,"
             "center_freq:%d, center_freq1:%d, roamed:%d",
             ind->vif_idx, ind->status_code, ind->ap_idx,
             ind->chan.prim20_freq, ind->chan.center1_freq, ind->roamed);
     aml_set_scan_hang(aml_vif, 0, __func__, __LINE__);
-    aml_connect_flags_clr(aml_hw, AML_CONNECTING);
+    aml_connect_flags_clr(aml_vif, AML_CONNECTING);
+
     /* Retrieve IE addresses and lengths */
     req_ie = (const u8 *)ind->assoc_ie_buf;
     rsp_ie = req_ie + ind->assoc_req_ie_len;
@@ -1330,6 +1338,7 @@ static inline int aml_rx_sm_connect_ind(struct aml_hw *aml_hw,
         aml_recy_flags_set(AML_RECY_RX_RATE_ALLOC);
         aml_rx_rate_wq(&sta->sta_idx);
 #endif
+        aml_connect_flags_set(aml_vif, AML_GETTING_IP);
         aml_txq_tdls_vif_init(aml_vif);
         aml_mu_group_sta_init(sta, NULL);
         /* Look for TDLS Channel Switch Prohibited flag in the Extended Capability
@@ -1378,7 +1387,7 @@ static inline int aml_rx_sm_connect_ind(struct aml_hw *aml_hw,
 #endif
 
 #ifdef CONFIG_AML_RECOVERY
-        /*recovery conenct has no inetaddr_event,so check scc here */
+        /*recovery connect has no inetaddr_event,so check scc here */
         aml_check_scc();
 #endif
         if (pt_mode)
@@ -1427,10 +1436,12 @@ static inline int aml_rx_sm_connect_ind(struct aml_hw *aml_hw,
                 if (bss != NULL) {
                     AML_INFO("ssid:%s, bss_freq:%d", ssid_sprintf(aml_vif->sta.assoc_ssid, aml_vif->sta.assoc_ssid_len),
                             bss->channel->center_freq);
+                    // if vif has ip, flag should not be set. eg: recover and roam
+                    if ((ind->status_code == 0) && !memcmp(aml_vif->ipv4_addr, ipv4_addr, IPV4_ADDR_LEN))
+                        aml_connect_flags_set(aml_vif, AML_GETTING_IP);
                 } else {
                     AML_INFO("can't find bss in kernel");
                 }
-
                 cfg80211_connect_bss(dev, (const u8 *)ind->bssid.array, bss, req_ie, ind->assoc_req_ie_len, rsp_ie,
                     #if LINUX_VERSION_CODE <= KERNEL_VERSION(4, 12, 0)
                                     ind->assoc_rsp_ie_len, ind->status_code, GFP_ATOMIC);
@@ -1444,6 +1455,14 @@ static inline int aml_rx_sm_connect_ind(struct aml_hw *aml_hw,
                                         GFP_ATOMIC);
 
 #endif
+#if defined(IEEE80211_MLD_MAX_NUM_LINKS)
+                if ((ind->status_code != 0) && (wdev->connected)) {
+#else
+                if ((ind->status_code != 0) && (wdev->current_bss)) {
+#endif
+                    AML_INFO("roam fail sync status with kernel\n");
+                    cfg80211_disconnected(dev, 0, NULL, 0, false, GFP_KERNEL);
+                }
             }
     }
     netif_tx_start_all_queues(dev);
@@ -1466,7 +1485,7 @@ static inline int aml_rx_sm_disconnect_ind(struct aml_hw *aml_hw,
     AML_INFO("vif_idx:%d, reason_code: %d, reassoc: %d", aml_vif->vif_index, ind->reason_code, ind->reassoc);
 
 #ifdef CONFIG_AML_RECOVERY
-    if (aml_recy && aml_recy->link_loss.is_enabled
+    if ((pt_mode == 0) && aml_recy && aml_recy->link_loss.is_enabled
         && ind->reason_code == AML_RECY_REASON_CODE_LINK_LOSS) {
         AML_INFO("link loss disconnect happen, statistics scan and evaluates for recovery");
         aml_recy->link_loss.is_happened = true;
@@ -1504,10 +1523,10 @@ static inline int aml_rx_sm_disconnect_ind(struct aml_hw *aml_hw,
         aml_dealloc_global_rx_rate(aml_hw, aml_vif->sta.ap);
 #endif
         AML_INFO("sta assoc ap info was cleared, sta_idx:%d", aml_vif->sta.ap->sta_idx);
-        spin_lock_bh(&aml_vif->ap_lock);
+        spin_lock_bh(&aml_vif->vif_lock);
         aml_vif->sta.ap->valid = false;
         aml_vif->sta.ap = NULL;
-        spin_unlock_bh(&aml_vif->ap_lock);
+        spin_unlock_bh(&aml_vif->vif_lock);
     }
     aml_vif->generation++;
     aml_external_auth_disable(aml_vif);
@@ -1519,6 +1538,7 @@ static inline int aml_rx_sm_disconnect_ind(struct aml_hw *aml_hw,
     }
 #endif
 
+    aml_connect_flags_clr(aml_vif, AML_DISCONNECTING);
     return 0;
 }
 
@@ -1541,7 +1561,8 @@ static inline int aml_rx_sm_external_auth_required_ind(struct aml_hw *aml_hw,
     memcpy(params.ssid.ssid, ind->ssid.array,
            min_t(size_t, ind->ssid.length, sizeof(params.ssid.ssid)));
     params.key_mgmt_suite = ind->akm;
-
+    AML_INFO("ind->vif_idx > NX_VIRT_DEV_MAX %d, !aml_vif->up %d, (AML_VIF_TYPE(aml_vif) != NL80211_IFTYPE_STATION) %d",
+             ind->vif_idx > NX_VIRT_DEV_MAX, !aml_vif->up, (AML_VIF_TYPE(aml_vif) != NL80211_IFTYPE_STATION));
     if ((ind->vif_idx > NX_VIRT_DEV_MAX) || !aml_vif->up ||
         (AML_VIF_TYPE(aml_vif) != NL80211_IFTYPE_STATION) ||
         cfg80211_external_auth_request(dev, &params, GFP_ATOMIC)) {
@@ -1946,6 +1967,47 @@ static inline int aml_dma_dl_result_ind(struct aml_hw *aml_hw,
     return 0;
 }
 #endif
+static inline int aml_coex_get_status_ind(struct aml_hw *aml_hw,
+                                      struct aml_cmd *cmd,
+                                      struct ipc_e2a_msg *msg)
+{
+    struct coex_get_status *ind = (struct coex_get_status *)msg->param;
+
+    printk("\nCoex Status Info: \n");
+
+    if (ind->coex_state == 1)
+    {
+        printk("coex work on TDD, work reason: %x; \n", ind->work_mode);
+    }
+    else
+    {
+        printk("coex work on FDD, work reason: %x; \n", ind->work_mode);
+    }
+
+    printk("\nBT Link Info: \n");
+    if (ind->bt_work_status & BIT(21))
+    {
+        printk("BT work on ESCO mode; \n");
+    }
+    if (ind->bt_work_status & BIT(22))
+    {
+        printk("BT work on SLAVE mode; \n");
+    }
+    if (ind->bt_work_status & BIT(24))
+    {
+        printk("BT work with CLASSIC; \n");
+    }
+    if (ind->bt_work_status & BIT(25))
+    {
+        printk("BT work with BLE; \n");
+    }
+    if (ind->bt_work_status & BIT(26))
+    {
+        printk("BT REQ TDD; \n");
+    }
+
+    return 0;
+}
 
 static inline int aml_scanu_cancel_cfm(struct aml_hw *aml_hw,
                                       struct aml_cmd *cmd,
@@ -2105,6 +2167,23 @@ static inline int aml_rx_coexist_stop_restore_txq_ind(struct aml_hw *aml_hw,
     return 0;
 }
 
+static inline int aml_traffic_busy_ind(struct aml_hw *aml_hw,
+                                         struct aml_cmd *cmd,
+                                         struct ipc_e2a_msg *msg)
+{
+    struct traffic_busy *host_cpu = (struct traffic_busy *)msg->param;
+    struct traffic_busy *traffic_param = (struct traffic_busy *)msg->param;
+
+    if (traffic_param->td_flag == TRAFFIC_SCAN_FLAG) {
+        if (traffic_param->traffic_busy_flag) {
+            printk("traffic busy!!\n");
+        } else {
+            printk("traffic idle!!\n");
+        }
+    }
+    return 0;
+}
+
 #ifdef CONFIG_AML_SOFTMAC
 
 static msg_cb_fct mm_hdlrs[MSG_I(MM_MAX)] = {
@@ -2203,6 +2282,8 @@ static msg_cb_fct priv_hdlrs[MSG_I(PRIV_SUB_E2A_MAX)] = {
     [MSG_I(PRIV_SDIO_USB_REORD_INFO_IND)] = aml_sdio_usb_rx_reord_flush_ind,
     [MSG_I(PRIV_FT_AUTH_RSP_TIMEOUT_IND)] = aml_rx_sm_ft_auth_rsp_timeout_ind,
     [MSG_I(PRIV_COEX_STOP_RESTORE_TXQ_IND)] = aml_rx_coexist_stop_restore_txq_ind,
+    [MSG_I(PRIV_TRAFFIC_BUSY_IND)]    = aml_traffic_busy_ind,
+    [MSG_I(PRIV_COEX_GET_STATUS)]     = aml_coex_get_status_ind,
 };
 
 static msg_cb_fct *msg_hdlrs[] = {

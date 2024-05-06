@@ -24,6 +24,7 @@
 #include "aml_wq.h"
 #include "aml_sap.h"
 #include "chip_intf_reg.h"
+#include "aml_compat.h"
 
 const struct mac_addr mac_addr_bcst = {{0xFFFF, 0xFFFF, 0xFFFF}};
 
@@ -799,16 +800,11 @@ int aml_send_bcn_change(struct aml_hw *aml_hw, u8 vif_idx, u32 bcn_addr,
                      "have different value");
 #endif /* CONFIG_AML_SOFTMAC */
     if (csa_oft) {
-#ifdef CONIG_AML_CSA_MODE
-        req->csa_oft[0] = csa_oft[0] & 0xff;
-        req->csa_oft[1] = (csa_oft[0] >> 8) & 0xff;
-        AML_INFO("req->csa_oft[0]:%d, req->csa_oft[1]:%d", req->csa_oft[0], req->csa_oft[1]);
-#else
         int i;
         for (i = 0; i < BCN_MAX_CSA_CPT; i++) {
             req->csa_oft[i] = csa_oft[i];
         }
-#endif
+        AML_INFO("req->csa_oft[0]:%d, req->csa_oft[1]:%d", req->csa_oft[0], req->csa_oft[1]);
     }
 
     /* Send the MM_BCN_CHANGE_REQ message to LMAC FW */
@@ -850,6 +846,7 @@ int aml_send_cancel_roc(struct aml_hw *aml_hw)
 
     AML_DBG(AML_FN_ENTRY_STR);
 
+    aml_tx_cfm_wait_rsp(aml_hw, false, __func__, __LINE__);
     /* Build the MM_REMAIN_ON_CHANNEL_REQ message */
     req = aml_msg_zalloc(MM_REMAIN_ON_CHANNEL_REQ, TASK_MM, DRV_TASK_ID,
                           sizeof(struct mm_remain_on_channel_req));
@@ -2129,6 +2126,23 @@ int aml_send_me_set_ps_mode(struct aml_hw *aml_hw, u8 ps_mode)
     return ret;
 }
 
+struct element * aml_get_md_ie(struct aml_vif *vif, struct cfg80211_connect_params *sme)
+{
+    if ((sme->auth_type == NL80211_AUTHTYPE_OPEN_SYSTEM) && (vif->sta.ft_assoc_ies)) {
+        /*get mdie*/
+        const struct element *mde, *mde_req;
+        mde_req = cfg80211_find_elem(WLAN_EID_MOBILITY_DOMAIN,
+                                 sme->ie, sme->ie_len);
+        mde = cfg80211_find_elem(WLAN_EID_MOBILITY_DOMAIN,
+                             vif->sta.ft_assoc_ies, vif->sta.ft_assoc_ies_len);
+        if ((!mde_req) && (mde)) {
+            printk("add md ie\n");
+            return mde;
+        }
+    }
+    return NULL;
+}
+
 int aml_send_sm_connect_req(struct aml_hw *aml_hw,
                              struct aml_vif *aml_vif,
                              struct cfg80211_connect_params *sme,
@@ -2136,10 +2150,15 @@ int aml_send_sm_connect_req(struct aml_hw *aml_hw,
 {
     struct sm_connect_req *req;
     int i, ie_len;
+    const struct element *mde = NULL;
 
     AML_DBG(AML_FN_ENTRY_STR);
 
     ie_len = update_connect_req(aml_vif, sme);
+    mde = aml_get_md_ie(aml_vif, sme);
+    if (mde) {
+        ie_len += (sizeof(struct element) + mde->datalen);
+    }
 
     /* Build the SM_CONNECT_REQ message */
     req = aml_msg_zalloc(SM_CONNECT_REQ, TASK_SM, DRV_TASK_ID,
@@ -2222,6 +2241,12 @@ int aml_send_sm_connect_req(struct aml_hw *aml_hw,
         req->flags |= WPA3_SAE_IN_USE;
     }
     copy_connect_ies(aml_vif, req, sme);
+    if (mde) {
+        u8 * ie = (u8 *)req->ie_buf;
+        ie += req->ie_len;
+        memcpy(ie, mde, (sizeof(struct element) + mde->datalen));
+        req->ie_len += (sizeof(struct element) + mde->datalen);
+    }
 
     /* Set UAPSD queues */
     req->uapsd_queues = aml_mod_params.uapsd_queues;
@@ -2390,6 +2415,8 @@ int aml_send_apm_start_req(struct aml_hw *aml_hw, struct aml_vif *vif,
         ht_cap->cap_info |= aml_hw->mod_params->use_2040 ? IEEE80211_HT_CAP_SGI_40 : 0;
     }
 
+    aml_change_he_mcs(aml_hw, var_pos, len);
+
 #ifdef SCC_STA_SOFTAP
     aml_scc_save_init_band(band);
 #endif
@@ -2499,7 +2526,7 @@ int aml_send_scanu_req(struct aml_hw *aml_hw, struct aml_vif *aml_vif,
     int i;
     uint8_t chan_flags = 0;
 
-    AML_DBG(AML_FN_ENTRY_STR);
+    AML_INFO("vif:%d", aml_vif->vif_index);
 
     /* Build the SCANU_START_REQ message */
     req = aml_msg_zalloc(SCANU_START_REQ, TASK_SCANU, DRV_TASK_ID,
@@ -4049,7 +4076,7 @@ int aml_pcie_prssr_test(struct net_device *dev, int start_addr, int len, u32_l p
     len = len >> 1;
 
     AML_PRINT(AML_DBG_MODULES_MSG_TX, "%s,%d, dir: %d, length: %d \n",__func__, __LINE__, dir, len);
-    if (dir == 1)
+    if(dir == 1)
     {
         aml_pcie_dl_malloc_test(aml_hw, start_addr, len, payload);
     }
@@ -4078,6 +4105,22 @@ int aml_coex_cmd(struct net_device *dev, u32_l coex_cmd, u32_l cmd_ctxt_1, u32_l
     return aml_priv_send_msg(aml_hw, coex_cmd_param, 0, 0, NULL);
 }
 
+int aml_coex_get_status(struct net_device *dev)
+{
+    void *void_param;
+    struct aml_vif *aml_vif = netdev_priv(dev);
+    struct aml_hw *aml_hw = aml_vif->aml_hw;
+
+    void_param = aml_priv_msg_zalloc(MM_SUB_COEX_GET_STATUS, 0);
+
+    if (!void_param)
+        return -ENOMEM;
+
+    printk("%s,%d, coex_get_status;",__func__, __LINE__);
+    /* coverity[leaked_storage] - coex_cmd_param will be freed later */
+    return aml_priv_send_msg(aml_hw, void_param, 0, 0, NULL);
+}
+
 int _aml_set_pt_calibration(struct aml_vif *aml_vif, int pt_cali_val)
 {
     struct aml_hw *aml_hw = aml_vif->aml_hw;
@@ -4095,18 +4138,29 @@ int _aml_set_pt_calibration(struct aml_vif *aml_vif, int pt_cali_val)
     return aml_priv_send_msg(aml_hw, pt_calibration, 0, 0, NULL);
 }
 
-int aml_send_notify_ip(struct aml_vif *aml_vif,u8_l ip_ver,u8_l*ip_addr)
+int aml_send_notify_ip(struct aml_vif *aml_vif, u8_l ip_ver, u8_l *ip_addr)
 {
-    struct aml_hw *aml_hw = aml_vif->aml_hw;
+    struct aml_hw *aml_hw;
     notify_ip_addr_t *notify_ip_addr;
-    notify_ip_addr =  aml_priv_msg_zalloc( MM_SUB_NOTIFY_IP, sizeof(notify_ip_addr_t));
+
+    if (!aml_vif) {
+        printk("aml vif param invald\n");
+        return -EINVAL;
+    }
+    aml_hw = aml_vif->aml_hw;
+
+    notify_ip_addr = aml_priv_msg_zalloc(MM_SUB_NOTIFY_IP, sizeof(notify_ip_addr_t));
     if (!notify_ip_addr) {
         return -ENOMEM;
     }
 
     notify_ip_addr->vif_idx = aml_vif->vif_index;
     notify_ip_addr->ip_ver = ip_ver;
-    memcpy(notify_ip_addr->ipv4_addr,ip_addr,IPV4_ADDR_LEN);
+    if (ip_ver == IPV4_VER) {
+        memcpy(notify_ip_addr->ipv4_addr, ip_addr, IPV4_ADDR_LEN);
+    } else if (ip_ver == IPV6_VER) {
+        memcpy(notify_ip_addr->ipv6_addr, ip_addr, IPV6_ADDR_LEN);
+    }
     /* coverity[leaked_storage] - notify_ip_addr will be freed later */
     return aml_priv_send_msg(aml_hw, notify_ip_addr, 0, 0, NULL);
 }
@@ -4187,8 +4241,6 @@ int aml_send_extcapab_req(struct aml_hw *aml_hw)
     return aml_priv_send_msg(aml_hw, req, 0, MM_MSG_BYPASS_ID, NULL);
 }
 
-#define AML_SYNC_TRACE_MON_INTERVAL    (60 * HZ)
-
 void aml_sync_trace_cb(struct timer_list *t)
 {
     struct aml_hw *aml_hw = from_timer(aml_hw, t, sync_trace_timer);
@@ -4217,6 +4269,49 @@ int aml_sync_trace_init(struct aml_hw *aml_hw)
 int aml_sync_trace_deinit(struct aml_hw *aml_hw)
 {
     del_timer_sync(&aml_hw->sync_trace_timer);
+    return 0;
+}
+
+void aml_sync_fw_trace_time_cb(struct timer_list *t)
+{
+    struct aml_hw *aml_hw = from_timer(aml_hw, t, detection_trace_timer);
+    static uint32_t trace_ts = 0;
+    enum aml_wq_type type = AML_WQ_HOST_GET_TRACE;
+    struct aml_wq *aml_wq;
+
+    if ((aml_hw->trace_bit_flag & TRACE_ENABLE_BIT_FLAG)
+        && !(aml_hw->trace_bit_flag & TRACE_TIMEOUT_FORCE_READ_BIT_FLAG)
+        && g_trace_ts == trace_ts) {
+        aml_wq = aml_wq_alloc(1);
+        if (!aml_wq) {
+            AML_INFO("alloc workqueue out of memory");
+            return;
+        }
+        aml_wq->id = AML_WQ_HOST_GET_TRACE;
+        memcpy(aml_wq->data, &type, 1);
+        aml_wq_add(aml_hw, aml_wq);
+        aml_hw->trace_bit_flag |= TRACE_TIMEOUT_FORCE_READ_BIT_FLAG;
+    }
+    trace_ts = g_trace_ts;
+    mod_timer(&aml_hw->detection_trace_timer, jiffies + AML_SYNC_FW_TRACE_TIME_INTERVAL);
+}
+
+int aml_detection_trace_init(struct aml_hw *aml_hw)
+{
+    if (!(aml_hw->trace_bit_flag & TRACE_TIMEOUT_TIMER_INIT_BIT_FLAG) && aml_bus_type != PCIE_MODE) {
+        timer_setup(&aml_hw->detection_trace_timer, aml_sync_fw_trace_time_cb, 0);
+        mod_timer(&aml_hw->detection_trace_timer, jiffies + AML_SYNC_FW_TRACE_TIME_INTERVAL);
+        aml_hw->trace_bit_flag |= TRACE_TIMEOUT_TIMER_INIT_BIT_FLAG;
+    }
+    return 0;
+}
+
+int aml_detection_trace_deinit(struct aml_hw *aml_hw)
+{
+    if (aml_hw->trace_bit_flag & TRACE_TIMEOUT_TIMER_INIT_BIT_FLAG && aml_bus_type != PCIE_MODE) {
+        del_timer_sync(&aml_hw->detection_trace_timer);
+        aml_hw->trace_bit_flag &= ~TRACE_TIMEOUT_TIMER_INIT_BIT_FLAG;
+    }
     return 0;
 }
 

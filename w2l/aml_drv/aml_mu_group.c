@@ -618,7 +618,7 @@ void aml_mu_group_sta_select(struct aml_hw *aml_hw)
 
         /* reorder list of group with more that 2 users */
         update = 1;
-        while (update) {
+        while(update) {
             update = 0;
             for (i = 0; i < cnt - 1; i++) {
                 if (traffic[order[i]] < traffic[order[i + 1]]) {

@@ -123,6 +123,8 @@ struct aml_fw_trace {
 struct log_file_info {
     char *log_buf;
     uint16_t *ptr;
+    uint16_t len;
+    uint16_t *buf;
     struct mutex mutex;
 };
 

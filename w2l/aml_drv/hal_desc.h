@@ -375,6 +375,15 @@ struct tx_sdio_usb_cfm_tag
     u32_l reserve;
 };
 
+struct w2l_tx_sdio_usb_cfm_tag
+{
+#ifdef CONFIG_AML_SPLIT_TX_BUF
+    u16_l amsdu_size;
+#endif
+    union aml_sdio_usb_hw_txstatus status;
+    u32_l hostid;
+};
+
 struct chan_switch_ind_info
 {
     uint32_t msg_id;

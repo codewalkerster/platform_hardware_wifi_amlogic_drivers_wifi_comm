@@ -1,4 +1,4 @@
-AML_VERS_NUM=v0.0.1_2024-02.26-w2l
+AML_VERS_NUM=6.10.0.0
 #KERNELDIR=/usr/lib/modules/5.8.0-63-generic/build
 PWD=$(shell pwd)
 ifeq ($(ARCH),)
@@ -113,9 +113,10 @@ CONFIG_AML_RX_BIGSIZE ?= n
 CONFIG_AML_NAPI ?= y
 
 # Support 4.9 ax
-CONFIG_KERNEL_AX_PATCH ?= n
+ifeq ($(CONFIG_AML_KERNEL_4_9),y)
+CONFIG_KERNEL_AX_PATCH ?= y
+endif
 # } // NEED 4.9 PATCH
-#
 
 #CONFIG_SDIO_TX_ENH ?= y
 

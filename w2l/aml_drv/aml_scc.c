@@ -85,7 +85,7 @@ char chan_width_trace[][35] = {
  *
  * Return vif's idx of diff chan
  */
-u8 aml_scc_get_confilct_vif_idx(struct aml_vif *sap_vif)
+u8 aml_scc_get_conflict_vif_idx(struct aml_vif *sap_vif)
 {
     u32 i;
     for (i = 0; i < NX_VIRT_DEV_MAX; i++) {
@@ -216,7 +216,7 @@ int aml_scc_change_beacon_ht_ie(struct wiphy *wiphy, struct net_device *dev, str
     if (ht_ie && ht_ie[1] >= sizeof(struct ieee80211_ht_operation)) {
         struct ieee80211_ht_operation *htop = (void *)(ht_ie + 2);
         htop->primary_chan = chan_no;
-        /*clear sencond channel offset,channel width*/
+        /*clear second channel offset,channel width*/
         htop->ht_param &= 0xF8;
         if (target_chdef.width >= NL80211_CHAN_WIDTH_40) {
             htop->ht_param |= IEEE80211_HT_PARAM_CHAN_WIDTH_ANY;
@@ -237,17 +237,30 @@ int aml_scc_change_beacon_ht_ie(struct wiphy *wiphy, struct net_device *dev, str
             case NL80211_CHAN_WIDTH_20:
             case NL80211_CHAN_WIDTH_40:
                 vhtop->chan_width = 0;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 12, 0)
                 vhtop->center_freq_seg0_idx = 0;
                 vhtop->center_freq_seg1_idx = 0;
+#else
+                vhtop->center_freq_seg1_idx = 0;
+                vhtop->center_freq_seg2_idx = 0;
+#endif
             break;
             case NL80211_CHAN_WIDTH_80:
             case NL80211_CHAN_WIDTH_160:
             case NL80211_CHAN_WIDTH_80P80:
                 vhtop->chan_width = 1;
                 if (target_chdef.center_freq1)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 12, 0)
                     vhtop->center_freq_seg0_idx = aml_ieee80211_freq_to_chan(target_chdef.center_freq1, target_chdef.chan->band);
+#else
+                    vhtop->center_freq_seg1_idx = aml_ieee80211_freq_to_chan(target_chdef.center_freq1, target_chdef.chan->band);
+#endif
                 if (target_chdef.center_freq2)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 12, 0)
                     vhtop->center_freq_seg1_idx = aml_ieee80211_freq_to_chan(target_chdef.center_freq2, target_chdef.chan->band);
+#else
+                    vhtop->center_freq_seg2_idx = aml_ieee80211_freq_to_chan(target_chdef.center_freq2, target_chdef.chan->band);
+#endif
             break;
         }
     }
@@ -476,7 +489,7 @@ u8 aml_get_operation_class(struct cfg80211_chan_def chandef)
     return ret;
 }
 
-static int aml_csa_send_action(struct aml_hw *aml_hw, struct aml_vif *aml_vif, struct aml_sta *sta, struct cfg80211_chan_def chan_def)
+int aml_csa_send_action(struct aml_hw *aml_hw, struct aml_vif *aml_vif, struct aml_sta *sta, struct cfg80211_chan_def chan_def)
 {
     struct sk_buff *skb;
     int ret = 0;
@@ -575,7 +588,7 @@ static int aml_scc_channel_switch(struct aml_hw *aml_hw, struct aml_vif *vif, st
     *(pos + idx++) = aml_get_operation_class(chan_def);//new operating class
     *(pos + idx++) = ieee80211_frequency_to_channel(chan_def.chan->center_freq);//chan no
     *(pos + idx++) = CSA_COUNT;//count
-    /*add second channal offset ie for 40M width*/
+    /*add second channel offset ie for 40M width*/
     if (chan_def.width == NL80211_CHAN_WIDTH_40) {
         *(pos + idx++) = WLAN_EID_SECONDARY_CHANNEL_OFFSET; //ie
         *(pos + idx++) = 1; //len
@@ -687,6 +700,7 @@ void aml_scc_check_chan_conflict(struct aml_hw *aml_hw)
                 struct aml_vif *target_vif ;
                 struct cfg80211_chan_def target_chdef;
                 struct cfg80211_chan_def cur_chdef;
+                u8 all_csa_support = true;
 
 #ifdef CONFIG_AML_RECOVERY
                 if (aml_recy_flags_chk(AML_RECY_STOP_AP_PROC)) {
@@ -694,7 +708,7 @@ void aml_scc_check_chan_conflict(struct aml_hw *aml_hw)
                     break;
                 }
 #endif
-                target_vif_idx = aml_scc_get_confilct_vif_idx(vif);
+                target_vif_idx = aml_scc_get_conflict_vif_idx(vif);
                 AML_INFO("target_idx:%d, sta_list:%d, use_csa:%d", target_vif_idx, list_empty(&vif->ap.sta_list), scc_use_csa);
                 if (target_vif_idx == 0xff) {
                     break;
@@ -712,24 +726,45 @@ void aml_scc_check_chan_conflict(struct aml_hw *aml_hw)
                     break;
                 }
 
-                if (aml_scc_get_init_band() != target_chdef.chan->band) {
+                if (aml_scc_get_init_band() != target_chdef.chan->band && (AML_VIF_TYPE(vif) == NL80211_IFTYPE_AP)) {
                     AML_INFO("init band conflict with target band [%d %d]\n",aml_scc_get_init_band(),target_chdef.chan->band);
                     break;
                 }
-                AML_INFO("chan %d,bw:%s --> chan %d,bw:%s ",
+
+                if ((target_chdef.chan->flags & IEEE80211_CHAN_RADAR) && (AML_VIF_TYPE(vif) == NL80211_IFTYPE_P2P_GO)) {
+                    AML_INFO("target is radar chan");
+                    break;
+                }
+
+                //check if all peer support csa
+                if (!list_empty(&vif->ap.sta_list)) {
+                    struct aml_sta *sta, *tmp;
+                    list_for_each_entry_safe(sta, tmp, &vif->ap.sta_list, list) {
+                        if (sta->valid && (!sta->csa_support)) {
+                            all_csa_support = false;
+                        }
+                    }
+                }
+
+                if ((AML_VIF_TYPE(vif) == NL80211_IFTYPE_P2P_GO) && (all_csa_support == false)) {
+                    AML_INFO("not all peer support csa");
+                    break;
+                }
+
+                AML_INFO("chan %d, bw:%s --> chan %d, bw:%s ",
                     aml_ieee80211_freq_to_chan(cur_chdef.chan->center_freq, cur_chdef.chan->band),
                     chan_width_trace[cur_chdef.width],
                     aml_ieee80211_freq_to_chan(target_chdef.chan->center_freq, target_chdef.chan->band),
                     chan_width_trace[target_chdef.width]);
 
                 if (!(list_empty(&vif->ap.sta_list)) && scc_use_csa) {
-                    struct aml_sta *sta;
-                    list_for_each_entry(sta, &vif->ap.sta_list, list) {
+                    struct aml_sta *sta, *tmp;
+                    list_for_each_entry_safe(sta, tmp, &vif->ap.sta_list, list) {
                         if (sta->valid) {
                             int ret;
                             aml_ps_bh_enable(aml_hw, sta, 1);//we always consider peer is sleep
                             ret = aml_csa_send_action(aml_hw, vif, sta, target_chdef);
-                            AML_INFO("send csa action to :%pM,ret:%d", sta->mac_addr, ret);
+                            AML_INFO("send csa action to :%pM, ret:%d", sta->mac_addr, ret);
                         }
                     }
                     aml_scc_channel_switch(aml_hw, vif, target_chdef);
@@ -782,9 +817,11 @@ void aml_scc_deinit(void)
 {
     if (scc_bcn_buf) {
         kfree(scc_bcn_buf);
+        scc_bcn_buf = NULL;
     }
     if (scc_csa_bcn) {
         kfree(scc_csa_bcn);
+        scc_csa_bcn = NULL;
     }
     AML_SCC_CLEAR_BEACON_UPDATE();
 }

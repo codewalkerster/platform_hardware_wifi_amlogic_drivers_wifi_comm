@@ -10,6 +10,8 @@
 #define P2P_ELEMENT_HDR_LEN         6
 #define P2P_ATT_COUNTRY_STR_LEN     3
 #define P2P_ATT_BODY_OFT            3
+#define P2P_NEG_RSP_DROP_TIME       10
+#define WFD_IE_OUI_TYPE             0x0a
 
 enum p2p_attr_id
 {
@@ -48,9 +50,20 @@ enum p2p_action_type {
     P2P_ACTION_PROV_DISC_RSP,       /* Provision Discovery Response */
 };
 
+enum p2p_neg_state {
+    P2P_NOT_IN_NEG = 0,
+    P2P_NEG_RECV_NEG_REQ,
+    P2P_NEG_SEND_NEG_REQ,
+    P2P_NEG_RECV_NEG_RSP,
+    P2P_NEG_SEND_NEG_RSP,
+    P2P_NEG_RECV_NEG_CFM,
+    P2P_NEG_SEND_NEG_CFM,
+};
+
 extern char p2p_pub_action_trace[][30];
 extern char p2p_action_trace[][30];
 extern u32 aml_get_p2p_ie_offset(const u8 *buf,u32 frame_len);
+extern bool_l aml_is_include_miracast_ie(const u8 *buf,u32 frame_len);
 extern void aml_change_p2p_chanlist(struct aml_vif *vif, u8 *buf, u32 frame_len,u32* frame_len_offset,struct cfg80211_chan_def chan_def);
 extern void aml_change_p2p_intent(struct aml_vif *vif, u8 *buf, u32 frame_len,u32* frame_len_offset);
 extern void aml_change_p2p_operchan(struct aml_vif *vif, u8 *buf, u32 frame_len, struct cfg80211_chan_def chan_def);

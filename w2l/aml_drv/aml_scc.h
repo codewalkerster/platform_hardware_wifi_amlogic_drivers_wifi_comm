@@ -39,5 +39,6 @@ void aml_scc_sync_bcn(struct aml_hw *aml_hw, struct aml_wq *aml_wq);
 void aml_check_scc(void);
 u8 aml_get_operation_class(struct cfg80211_chan_def chan_def);
 void aml_scc_p2p_action_restore(u8 *buf, u32* len_diff);
+int aml_csa_send_action(struct aml_hw *aml_hw, struct aml_vif *aml_vif, struct aml_sta *sta, struct cfg80211_chan_def chan_def);
 
 #endif /* _AML_SCC_H_ */

@@ -46,7 +46,7 @@ subdir-ccflags-$(CONFIG_AML_RECOVERY) += -DCONFIG_AML_RECOVERY
 
 # FW VARS
 subdir-ccflags-y += -DNX_VIRT_DEV_MAX=4
-subdir-ccflags-y += -DNX_REMOTE_STA_MAX=10
+subdir-ccflags-y += -DNX_REMOTE_STA_MAX=16
 subdir-ccflags-y += -DNX_MU_GROUP_MAX=62
 subdir-ccflags-y += -DNX_TX_MAX_RATES=4
 subdir-ccflags-y += -DNX_CHAN_CTXT_CNT=3

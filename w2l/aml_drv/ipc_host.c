@@ -233,12 +233,21 @@ static void ipc_usb_host_msgack_handler(struct ipc_host_env_tag *env)
     env->cb.recv_msgack_ind(env->pthis, hostid);
 }
 
+extern struct aml_bus_state_detect bus_state_detect;
 static void ipc_sdio_host_msgack_handler(struct ipc_host_env_tag *env)
 {
     void *hostid = env->msga2e_hostid;
     struct aml_hw *aml_hw = (struct aml_hw *)env->pthis;
     volatile struct ipc_a2e_msg msg_a2e_buf = {0};
+
+
     aml_hw->plat->hif_sdio_ops->hi_random_ram_read((unsigned char *)&msg_a2e_buf, (unsigned char *)&env->shared->msg_a2e_buf, sizeof(struct ipc_a2e_msg));
+#ifdef CONFIG_AML_RECOVERY
+    if (bus_state_detect.bus_err) {
+        AML_INFO("bus err(%d), return\n", bus_state_detect.bus_err);
+        return;
+    }
+#endif
     ASSERT_ERR(hostid);
     ASSERT_ERR(env->msga2e_cnt == (((struct lmac_msg *)(&msg_a2e_buf.msg))->src_id & 0xFF));
     if (!hostid) {
@@ -313,7 +322,7 @@ static void ipc_host_dbg_handler(struct ipc_host_env_tag *env)
 static void ipc_host_trace_handler(struct ipc_host_env_tag *env)
 {
     if (aml_bus_type != PCIE_MODE) {
-       env->cb.recv_trace_ind(env->pthis, 1);
+       env->cb.recv_trace_ind(env->pthis);
     }
 }
 
@@ -832,6 +841,12 @@ void ipc_host_txdesc_push(struct ipc_host_env_tag *env, struct aml_ipc_buf *buf)
     }
 }
 
+#ifdef CONFIG_SDIO_TX_ENH
+#ifdef SDIO_TX_ENH_DBG
+extern cfm_log cfmlog;
+#endif
+#endif
+
 /**
  * ipc_host_tx_host_ptr_to_id() - Save and convert host pointer to host id
  *
@@ -847,12 +862,22 @@ void ipc_host_txdesc_push(struct ipc_host_env_tag *env, struct aml_ipc_buf *buf)
 uint32_t ipc_host_tx_host_ptr_to_id(struct ipc_host_env_tag *env, void *host_ptr)
 {
     struct ipc_hostid *tx_hostid;
+    struct aml_hw *aml_hw = (struct aml_hw *)env->pthis;
     tx_hostid = list_first_entry_or_null(&env->tx_hostid_available,
                                          struct ipc_hostid, list);
     if (!tx_hostid)
         return 0;
 
     list_del(&tx_hostid->list);
+
+#ifdef CONFIG_SDIO_TX_ENH
+    if (aml_bus_type == SDIO_MODE)
+        aml_hw->txcfm_param.hostid_pushed++;
+#ifdef SDIO_TX_ENH_DBG
+    cfmlog.hostid_pushed = aml_hw->txcfm_param.hostid_pushed;
+#endif
+#endif
+
     list_add_tail(&tx_hostid->list, &env->tx_hostid_pushed);
     tx_hostid->hostptr = host_ptr;
     return tx_hostid->hostid;
@@ -917,7 +942,7 @@ void *ipc_host_tx_host_id_to_ptr_for_sdio_usb(struct ipc_host_env_tag *env, uint
     }
 
     list_del(&tx_hostid->list);
-    aml_hw->hostid_prefix = (aml_hw->hostid_prefix % 65535) + 1;
+    aml_hw->hostid_prefix = (aml_hw->hostid_prefix % 2047) + 1;
     tx_hostid->hostid = tx_hostid->hostid & 0xffff;
     tx_hostid->hostid = tx_hostid->hostid | (aml_hw->hostid_prefix << 16);
     list_add_tail(&tx_hostid->list, &env->tx_hostid_available);
@@ -1028,6 +1053,7 @@ void aml_sdio_usb_extend_irq_handle(struct aml_hw *aml_hw)
         case DYNAMIC_BUF_HOST_TX_STOP:
             aml_hw->dynabuf_stop_tx = DYNAMIC_BUF_HOST_TX_STOP;
             aml_hw->send_tx_stop_to_fw = 1;
+            up(&aml_hw->aml_tx_sem);
             break;
         case DYNAMIC_BUF_HOST_TX_START:
             aml_hw->dynabuf_stop_tx = 0;

@@ -25,12 +25,20 @@ extern unsigned long long g_dbg_modules;
 #define PRINT_BUF_SIZE 512
 #define LA_BUF_SIZE 2048
 #define LA_MEMORY_BASE_ADDRESS 0x60830000
+
+#if (defined(CONFIG_PT_MODE) || defined(CONFIG_LINUXPC_VERSION))
+static char *mactrace_path = "/lib/firmware/la_dump/mactrace";
+#else
 static char *mactrace_path = "/vendor/lib/firmware/la_dump/mactrace";
+#endif
+
 static char *reg_path = "/data/dumpinfo";
 #define REG_DUMP_SIZE 2048
 
 bool pt_mode = 0;
 static unsigned char offset_times = 0;
+static uint32_t g_csi_set_num = 0;
+static uint32_t g_abnormal_csi_num = 0;
 
 //hx add
 typedef unsigned char   U8;
@@ -537,6 +545,22 @@ int aml_get_rf_reg(struct net_device *dev, char *str_addr, union iwreq_data *wrq
     return 0;
 }
 
+int aml_get_csi_debug_info(struct net_device *dev, union iwreq_data *wrqu, char *extra)
+{
+    unsigned int num_csi_set = 0;
+    unsigned int num_csi_abnormal = 0;
+
+    num_csi_set = g_csi_set_num;
+    g_csi_set_num = 0;
+
+    num_csi_abnormal = g_abnormal_csi_num;
+    g_abnormal_csi_num = 0;
+
+    wrqu->data.length = scnprintf(extra, IW_PRIV_SIZE_MASK, "set_num:%08d, idle:%d, not_ready:%d", num_csi_set, (num_csi_abnormal >> 16), (num_csi_abnormal & 0xffff));
+    wrqu->data.length++;
+    return 0;
+}
+
 int aml_get_csi_status_com(struct net_device *dev, union iwreq_data *wrqu)
 {
     unsigned int ret_copy = 0;
@@ -544,6 +568,11 @@ int aml_get_csi_status_com(struct net_device *dev, union iwreq_data *wrqu)
 
     memset(&ind, 0, sizeof(struct csi_com_status_get_ind));
     aml_csi_status_com_read(dev, &ind);
+
+    if (ind.csi_abnormal_info & BIT(0))
+        g_abnormal_csi_num += 1;
+    else if (ind.csi_abnormal_info & BIT(1))
+        g_abnormal_csi_num += BIT(16);
 
     AML_PRINT(AML_DBG_MODULES_CSI, "time_stamp: %llu \n", ind.time_stamp);
     AML_PRINT(AML_DBG_MODULES_CSI, "mac_ra:     %02X%02X-%02X%02X-%02X%02X \n", ind.mac_ra[0], ind.mac_ra[1], ind.mac_ra[2], ind.mac_ra[3], ind.mac_ra[4], ind.mac_ra[5]);
@@ -572,6 +601,7 @@ int aml_get_csi_status_com(struct net_device *dev, union iwreq_data *wrqu)
     AML_PRINT(AML_DBG_MODULES_CSI, "extra_info:--- \n");
     AML_PRINT(AML_DBG_MODULES_CSI, "sequence_no:%u \n", ind.sequence_no);
     AML_PRINT(AML_DBG_MODULES_CSI, "csi_ready  :%u \n", ind.csi_ready);
+    AML_PRINT(AML_DBG_MODULES_CSI, "abnormal_csi:%x\n", ind.csi_abnormal_info);
 
     wrqu->data.length = sizeof(ind);
     ret_copy = copy_to_user(wrqu->data.pointer, (void*)&ind, wrqu->data.length);
@@ -630,8 +660,8 @@ int aml_set_csi(struct net_device *dev, char* arg_iw)
     #arg2-BIT1：protocol mode
     #arg3-BIT2：bw
     #arg4-BIT3：frame type
-    #arg5-BIT4：addr1
-    #arg6-BIT5：addr2
+    #arg5-BIT4：tx addr1
+    #arg6-BIT5：rx addr2
     **/
     if (count != 6)
         return 0;
@@ -679,7 +709,7 @@ int aml_set_csi(struct net_device *dev, char* arg_iw)
         mac_addr = aml_cmd_char_phrase(sep, arg[arg_index], &cmd_arg);
         if (mac_addr) {
             for (i = 0; i < 6; i++) {
-                req.mac_ra[i] = simple_strtoul(mac_addr[i], NULL, 16);
+                req.mac_ta[i] = simple_strtoul(mac_addr[i], NULL, 16);
             }
         }
         kfree(mac_addr);
@@ -697,7 +727,7 @@ int aml_set_csi(struct net_device *dev, char* arg_iw)
         mac_addr = aml_cmd_char_phrase(sep, arg[arg_index], &cmd_arg);
         if (mac_addr) {
             for (i = 0; i < 6; i++) {
-                req.mac_ta[i] = simple_strtoul(mac_addr[i], NULL, 16);
+                req.mac_ra[i] = simple_strtoul(mac_addr[i], NULL, 16);
             }
         }
         kfree(mac_addr);
@@ -708,6 +738,7 @@ int aml_set_csi(struct net_device *dev, char* arg_iw)
             req.mac_ra[0],req.mac_ra[1],req.mac_ra[2],req.mac_ra[3],req.mac_ra[4],req.mac_ra[5],
             req.mac_ta[0],req.mac_ta[1],req.mac_ta[2],req.mac_ta[3],req.mac_ta[4],req.mac_ta[5]);
 
+    g_csi_set_num++;
     aml_csi_set(dev, &req);
     kfree(arg);
     return 0;
@@ -1610,6 +1641,10 @@ static int aml_get_sdio_tx_enh_stats(struct net_device *dev)
     AML_PRINT(AML_DBG_MODULES_IWPRIV, "avg_cfm     :%u\n", cfmlog.avg_cfm);
     AML_PRINT(AML_DBG_MODULES_IWPRIV, "avg_cfm_page:%u\n", cfmlog.avg_cfm_page);
     AML_PRINT(AML_DBG_MODULES_IWPRIV, "cur_cfm_num :%u\n", cfmlog.cfm_num);
+    AML_PRINT(AML_DBG_MODULES_IWPRIV,"hostid_pushed_cnt :%u\n", cfmlog.hostid_pushed);
+    AML_PRINT(AML_DBG_MODULES_IWPRIV,"start_blk :%u\n", cfmlog.start_blk);
+    AML_PRINT(AML_DBG_MODULES_IWPRIV,"read_blk :%u\n", cfmlog.read_blk);
+    AML_PRINT(AML_DBG_MODULES_IWPRIV,"drv_txcfm_idx :%u\n", cfmlog.drv_txcfm_idx);
     AML_PRINT(AML_DBG_MODULES_IWPRIV, "cfm_read_cnt :%u\n", cfmlog.cfm_read_cnt);
     AML_PRINT(AML_DBG_MODULES_IWPRIV, "cfm_read_avg_blk :%u\n", cfmlog.cfm_read_blk_cnt/cfmlog.cfm_read_cnt);
     AML_PRINT(AML_DBG_MODULES_IWPRIV, "<------------------------rx info-------------------------->\n");
@@ -1813,7 +1848,7 @@ static int aml_get_tcp_ack_info(struct net_device *dev)
     AML_PRINT(AML_DBG_MODULES_IWPRIV, "ack_mgr->enable=%u\n", atomic_read(&ack_mgr->enable));
     AML_PRINT(AML_DBG_MODULES_IWPRIV, "ack_mgr->max_timeout=%u\n", atomic_read(&ack_mgr->max_timeout));
     AML_PRINT(AML_DBG_MODULES_IWPRIV, "ack_mgr->dynamic_adjust=%u\n", atomic_read(&ack_mgr->dynamic_adjust));
-    AML_PRINT(AML_DBG_MODULES_IWPRIV, "ack_mgr->total_drop_cnt=%u\n", ack_mgr->total_drop_cnt);
+    AML_PRINT(AML_DBG_MODULES_IWPRIV, "ack_mgr->session_num=%u\n", ack_mgr->used_num);
     AML_PRINT(AML_DBG_MODULES_IWPRIV, "ack_mgr->ack_winsize=%u\n", atomic_read(&ack_mgr->ack_winsize));
     return 0;
 }
@@ -1881,8 +1916,21 @@ static int aml_set_max_drop_num(struct net_device *dev, int num)
     struct aml_hw * aml_hw = aml_vif->aml_hw;
     struct aml_tcp_sess_mgr *ack_mgr = &aml_hw->ack_mgr;
 
-    atomic_set(&ack_mgr->max_drop_cnt, num);
-    atomic_set(&ack_mgr->dynamic_adjust, 0);
+    if (num < 0)
+    {
+        if (aml_bus_type == USB_MODE)
+            num = MAX_DROP_TCP_ACK_CNT_USB;
+        else
+            num = MAX_DROP_TCP_ACK_CNT;
+        atomic_set(&ack_mgr->max_drop_cnt, num);
+        atomic_set(&ack_mgr->dynamic_adjust, 1);
+    }
+    else
+    {
+        atomic_set(&ack_mgr->max_drop_cnt, num);
+        atomic_set(&ack_mgr->dynamic_adjust, 0);
+    }
+
     AML_PRINT(AML_DBG_MODULES_IWPRIV, "set tcp delay ack:ack_mgr->max_drop_cnt=%u,dynamic adjust=%d\n", atomic_read(&ack_mgr->max_drop_cnt), atomic_read(&ack_mgr->dynamic_adjust));
     return 0;
 }
@@ -3784,18 +3832,9 @@ int aml_emb_la_enable(struct net_device *dev)
         return 0;
     }
 
-    if (!(aml_hw->rx_buf_state & BUFFER_TX_USED_FLAG)) {
-        aml_send_set_buf_state_req(aml_hw, BUFFER_RX_FORCE_REDUCE);
-    }
+    _aml_set_la_enable(aml_hw, enable);
+    aml_hw->la_enable = 1;
 
-    while (!(aml_hw->rx_buf_state & BUFFER_TX_USED_FLAG)) {
-        usleep_range(2,3);
-    }
-
-    if (aml_hw->rx_buf_state & BUFFER_TX_USED_FLAG) {
-        _aml_set_la_enable(aml_hw,enable);
-        aml_hw->la_enable = 1;
-    }
     return 0;
 }
 
@@ -4252,28 +4291,27 @@ static int aml_pcie_lp_switch(struct net_device *dev, int status)
     return ret;
 }
 
+extern struct log_file_info trace_log_file_info;
 int aml_set_fwlog_cmd(struct net_device *dev, int mode)
 {
     struct aml_vif *aml_vif = netdev_priv(dev);
     struct aml_hw *aml_hw = aml_vif->aml_hw;
     int ret = 0;
 
-    if (aml_bus_type != PCIE_MODE) {
+    if (aml_bus_type != PCIE_MODE && trace_log_file_info.log_buf && trace_log_file_info.ptr && trace_log_file_info.buf) {
         if (mode == 0) {
-            ret = aml_traceind(aml_vif->aml_hw->ipc_env->pthis, mode);
+            aml_hw->trace_bit_flag &= ~TRACE_ENABLE_BIT_FLAG;
+            aml_detection_trace_deinit(aml_hw);
+            ret = aml_traceind(aml_vif->aml_hw->ipc_env->pthis);
             if (ret < 0)
                 return -1;
+        } else {
+            aml_hw->trace_bit_flag |= TRACE_ENABLE_BIT_FLAG;
+            aml_detection_trace_init(aml_hw);
         }
-
-#ifdef CONFIG_AML_DEBUGFS
-        ret = aml_log_file_info_init(mode);
-        if (ret < 0) {
-            AML_PRINT(AML_DBG_MODULES_IWPRIV, "aml_log_file_info_init fail\n");
-            return -1;
-        }
-#endif
-
         aml_send_fwlog_cmd(aml_vif, mode);
+    } else {
+        AML_PRINT(AML_DBG_MODULES_IWPRIV, "bus_type err or trace_log_file_info init failed!\n");
     }
     return 0;
 }
@@ -5045,7 +5083,9 @@ static int aml_iwpriv_get(struct net_device *dev,
             break;
 #endif
 #endif
-
+        case AML_COEX_GET_STATUS:
+            aml_coex_get_status(dev);
+            break;
         default:
             AML_PRINT(AML_DBG_MODULES_IWPRIV, "%s %d param err\n", __func__, __LINE__);
             break;
@@ -5130,6 +5170,9 @@ static int aml_iwpriv_get_char(struct net_device *dev,
             break;
         case AML_IWP_SET_EARLY_BEACON:
             aml_set_early_bcn_mode(dev, set, wrqu, extra);
+            break;
+        case AML_IWP_GET_CSI_DEBUG_INFO:
+            aml_get_csi_debug_info(dev, wrqu, extra);
             break;
         default:
             break;
@@ -5226,6 +5269,9 @@ static const struct iw_priv_args aml_iwpriv_private_args[] = {
     {
         AML_IWP_GET_TX_LFT,
         0, IW_PRIV_TYPE_INT | IW_PRIV_SIZE_FIXED | 1, "get_tx_lft"},
+    {
+        AML_COEX_GET_STATUS,
+        0, IW_PRIV_TYPE_INT | IW_PRIV_SIZE_FIXED | 1, "get_coex_status"},
     {
         AML_IWP_GET_LAST_RX,
         0, IW_PRIV_TYPE_INT | IW_PRIV_SIZE_FIXED | 1, "get_last_rx"},
@@ -5521,6 +5567,9 @@ static const struct iw_priv_args aml_iwpriv_private_args[] = {
         AML_IWP_SET_CSI,
         IW_PRIV_TYPE_CHAR | IW_PRIV_SIZE_MASK, IW_PRIV_TYPE_CHAR | IW_PRIV_SIZE_MASK, "set_csi"},
     {
+        AML_IWP_GET_CSI_DEBUG_INFO,
+        IW_PRIV_TYPE_CHAR | IW_PRIV_SIZE_MASK, IW_PRIV_TYPE_CHAR | IW_PRIV_SIZE_MASK, "csi_debug_info"},
+    {
         SIOCIWFIRSTPRIV + 6,
         IW_PRIV_TYPE_INT | IW_PRIV_INT_SIZE_MASK, IW_PRIV_TYPE_BYTE | IW_PRIV_SIZE_MASK, ""},
     {
@@ -5529,9 +5578,6 @@ static const struct iw_priv_args aml_iwpriv_private_args[] = {
     {
         AML_IWP_GET_CSI_STATUS_SP,
         IW_PRIV_TYPE_INT | IW_PRIV_INT_SIZE_MASK, IW_PRIV_TYPE_BYTE | IW_PRIV_SIZE_MASK, "get_csi_sp"},
-    {
-        AML_IWP_GET_CSI,
-        IW_PRIV_TYPE_INT | IW_PRIV_INT_SIZE_MASK, IW_PRIV_TYPE_BYTE | IW_PRIV_SIZE_MASK, "get_csi"},
     {
         SIOCIWFIRSTPRIV + 7,
         IW_PRIV_TYPE_CHAR | IW_PRIV_SIZE_FIXED | 4, 0, ""},

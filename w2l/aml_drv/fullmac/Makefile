@@ -33,44 +33,45 @@ CONFIG_AML_RX_SG ?= n
 CONFIG_AML_SW_PROFILING ?= n
 CONFIG_AML_DBG ?= n
 
-#CSA mode scc
-CONIG_AML_CSA_MODE ?= y
+#Enable LA (for non-PCIE platform only)
+#should make PROJ=SDIO VER=LA for firmware also
+CONFIG_AML_LA ?= n
 
 #usb large page
 CONFIG_AML_USB_LARGE_PAGE ?= y
 
 obj-m := w2l.o
-w2l-y := aml_msg_tx.o        \
-        aml_msg_rx.o        \
-        aml_utils.o         \
-        aml_cmds.o          \
-        aml_irqs.o          \
-        aml_cfg.o       \
-        aml_strs.o          \
+w2l-y := ../aml_msg_tx.o        \
+        ../aml_msg_rx.o        \
+        ../aml_utils.o         \
+        ../aml_cmds.o          \
+        ../aml_irqs.o          \
+        ../aml_cfg.o           \
+        ../aml_strs.o          \
         aml_rx.o            \
         aml_tx.o            \
-        aml_txq.o           \
+        ../aml_txq.o           \
         aml_main.o          \
-        aml_mod_params.o    \
+        ../aml_mod_params.o    \
         aml_mesh.o          \
-        aml_platform.o      \
-        aml_dini.o          \
-        ipc_host.o          \
+        ../aml_platform.o      \
+        ../aml_dini.o          \
+        ../ipc_host.o          \
         aml_tdls.o          \
-        hal_desc.o          \
-        aml_prealloc.o      \
-        aml_regdom.o        \
-        aml_android.o       \
-        aml_iwpriv_cmds.o   \
-        aml_p2p.o           \
-        aml_scc.o           \
-        aml_wq.o            \
-        aml_recy.o          \
-        aml_tcp_ack.o       \
-        aml_task.o          \
-        aml_rps.o           \
-        aml_sap.o           \
-        aml_mdns_offload.o
+        ../hal_desc.o          \
+        ../aml_prealloc.o      \
+        ../aml_regdom.o        \
+        ../aml_android.o       \
+        ../aml_iwpriv_cmds.o   \
+        ../aml_p2p.o           \
+        ../aml_scc.o           \
+        ../aml_wq.o            \
+        ../aml_recy.o		\
+        ../aml_tcp_ack.o          \
+        ../aml_task.o          \
+        ../aml_rps.o           \
+        ../aml_sap.o           \
+        ../aml_mdns_offload.o
 
 obj-m += w2l_comm.o
 w2l_comm-objs := \
@@ -83,13 +84,13 @@ w2l_comm-objs := \
         ../aml_bus/aml_static_buf.o \
         ../aml_bus/w2_usb.o
 
-w2l-$(CONFIG_AML_RADAR)       += aml_radar.o
-w2l-$(CONFIG_DEBUG_FS)         += aml_debugfs.o
-w2l-$(CONFIG_DEBUG_FS)         += aml_fw_dump.o
-w2l-$(CONFIG_DEBUG_FS)         += aml_fw_trace.o
-w2l-$(CONFIG_NL80211_TESTMODE) += aml_testmode.o
-w2l-$(CONFIG_AML_BFMER)       += aml_bfmer.o
-w2l-$(CONFIG_AML_MUMIMO_TX)   += aml_mu_group.o
+w2l-$(CONFIG_AML_RADAR)       += ../aml_radar.o
+w2l-$(CONFIG_DEBUG_FS)         += ../aml_debugfs.o
+w2l-$(CONFIG_DEBUG_FS)         += ../aml_fw_dump.o
+w2l-$(CONFIG_DEBUG_FS)         += ../aml_fw_trace.o
+w2l-$(CONFIG_NL80211_TESTMODE) += ../aml_testmode.o
+w2l-$(CONFIG_AML_BFMER)       += ../aml_bfmer.o
+w2l-$(CONFIG_AML_MUMIMO_TX)   += ../aml_mu_group.o
 
 ccflags-y := -DCONFIG_AML_FULLMAC
 ifneq ($(CUR_DIR),)
@@ -112,7 +113,6 @@ ccflags-$(CONFIG_AML_SW_PROFILING) += -DCONFIG_AML_SW_PROFILING
 ccflags-$(CONFIG_AML_MUMIMO_TX) += -DCONFIG_AML_MUMIMO_TX
 ccflags-$(CONFIG_AML_SUSPEND) += -DCONFIG_AML_SUSPEND
 ccflags-$(CONFIG_AML_LA) += -DCONFIG_AML_LA
-ccflags-$(CONIG_AML_CSA_MODE) += -DCONIG_AML_CSA_MODE
 ccflags-$(CONFIG_AML_USB_LARGE_PAGE) += -DCONFIG_AML_USB_LARGE_PAGE
 
 ifeq ($(CONFIG_AML_MUMIMO_TX), y)
@@ -129,6 +129,7 @@ endif
 
 #for buildroot
 ifeq ($(CONFIG_BUILDROOT), y)
+ccflags-y += -DCONFIG_BUILDROOT
 ccflags-y += -Wno-error=format=
 ccflags-y += -Wno-format
 ccflags-y += -Wno-error=implicit-fallthrough=

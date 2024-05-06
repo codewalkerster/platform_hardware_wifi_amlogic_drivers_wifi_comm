@@ -126,6 +126,9 @@ static int aml_pci_suspend(struct pci_dev *pdev, pm_message_t state)
         ERROR_DEBUG_OUT("pci_set_power_state error %d\n", ret);
     }
 
+    //Delay 100ms to ensure ltssm enters L1 completion, delaying PCIe PHY power-off.
+    usleep_range(100000, 120000);
+
     AML_PRINT(AML_DBG_MODULES_PCI, "%s ok exit\n", __func__);
     //aml_suspend_dump_cfgregs(bus, "AFTER_EP_SUSPEND");
     return ret;

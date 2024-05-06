@@ -25,6 +25,7 @@
 #include "aml_platform.h"
 #include "aml_main.h"
 #include "aml_scc.h"
+#include "aml_compat.h"
 
 #include "reg_access.h"
 #include "wifi_intf_addr.h"
@@ -46,6 +47,7 @@ static const char *const aml_recy_reason_code2str[RECY_REASON_CODE_MAX] = {
     [RECY_REASON_CODE_CMD_CRASH]       = "RECY_REASON_CODE_CMD_CRASH",
     [RECY_REASON_CODE_FW_LINKLOSS]     = "RECY_REASON_CODE_FW_LINKLOSS",
     [RECY_REASON_CODE_BUS_ERR]         = "RECY_REASON_CODE_BUS_ERR",
+    [RECY_REASON_CODE_TX_TIMEOUT]      = "RECY_REASON_CODE_TX_PKTS_TIMEOUT",
 };
 
 void aml_recy_flags_set(u32 flags)
@@ -258,6 +260,9 @@ int aml_recy_fw_reload_for_usb_sdio(struct aml_hw *aml_hw)
 Try_again:
 
     aml_platform_off(aml_hw, NULL);
+    if (aml_bus_type != PCIE_MODE) {
+        aml_clear_reorder_list();
+    }
     if (aml_bus_type == USB_MODE) {
        bus_state_detect.bus_reset_ongoing = 1;
        aml_usb_reset();
@@ -388,6 +393,8 @@ static int aml_recy_fw_reload(struct aml_hw *aml_hw)
 {
     int ret = 0;
 
+    clear_bit(AML_DEV_STARTED, &aml_hw->flags);
+
     if (aml_bus_type != PCIE_MODE) {
         ret = aml_recy_fw_reload_for_usb_sdio(aml_hw);
     } else {
@@ -448,11 +455,6 @@ static int aml_recy_vif_reset(struct aml_hw *aml_hw)
                 AML_VIF_TYPE(aml_vif) == NL80211_IFTYPE_P2P_CLIENT) {
                 netif_tx_stop_all_queues(dev);
                 netif_carrier_off(dev);
-                if (aml_vif->sta.ft_assoc_ies) {
-                    kfree(aml_vif->sta.ft_assoc_ies);
-                    aml_vif->sta.ft_assoc_ies = NULL;
-                    aml_vif->sta.ft_assoc_ies_len = 0;
-                }
                 if (aml_vif->sta.ap) {
                     aml_txq_sta_deinit(aml_hw, aml_vif->sta.ap);
                     aml_txq_tdls_vif_deinit(aml_vif);
@@ -564,6 +566,7 @@ static int aml_recy_vif_restart(struct aml_hw *aml_hw)
     return 0;
 }
 
+//extern struct usb_device *g_udev;
 int aml_recy_doit(struct aml_hw *aml_hw)
 {
     int ret;
@@ -594,6 +597,15 @@ int aml_recy_doit(struct aml_hw *aml_hw)
         goto out;
     }
     aml_recy_flags_clr(AML_RECY_DROP_XMIT_PKT);
+
+//    if (aml_bus_type == USB_MODE) {
+//        /* realloc usb_dev in function@auc_probe when usb do reset, it need to reinit data */
+//        aml_hw->plat->usb_dev = g_udev;
+//        dev_set_drvdata(&aml_hw->plat->usb_dev->dev, aml_hw);
+//        aml_hw->dev = aml_platform_get_dev(aml_hw->plat);
+//        set_wiphy_dev(aml_hw->wiphy, aml_hw->dev);
+//    }
+
     ret = aml_recy_fw_reload(aml_hw);
     if (ret) {
         RECY_DBG("fw reload failed");
@@ -615,7 +627,10 @@ out:
     atomic_set(&g_wifi_pm.drv_suspend_cnt, 0);
     atomic_set(&g_wifi_pm.is_shut_down, 0);
     aml_hw->state = WIFI_SUSPEND_STATE_NONE;
-    aml_recy_flags_clr(AML_RECY_STATE_ONGOING | AML_RECY_DROP_XMIT_PKT);
+    spin_lock_bh(&aml_recy->aml_hw->cmd_mgr.lock);
+    aml_recy->reason = 0;
+    spin_unlock_bh(&aml_recy->aml_hw->cmd_mgr.lock);
+    aml_recy_flags_clr(AML_RECY_STATE_ONGOING | AML_RECY_DROP_XMIT_PKT | AML_GETTING_IP);
 
     return ret;
 }
@@ -651,6 +666,10 @@ static int aml_recy_detection(void)
 
     cmd_mgr = &aml_recy->aml_hw->cmd_mgr;
     spin_lock_bh(&cmd_mgr->lock);
+    if (aml_recy->reason) {
+        spin_unlock_bh(&cmd_mgr->lock);
+        return false;
+    }
     if ((cmd_mgr->state == AML_CMD_MGR_STATE_CRASHED)
         || (aml_recy->link_loss.is_enabled && aml_recy->link_loss.is_requested)) {
         if (cmd_mgr->state == AML_CMD_MGR_STATE_CRASHED) {
@@ -738,7 +757,7 @@ int aml_recy_init(struct aml_hw *aml_hw)
 
 #ifndef CONFIG_PT_MODE
     timer_setup(&aml_recy->timer, aml_recy_timer_cb, 0);
-   // aml_recy_enable();
+    aml_recy_enable();
 #endif
     return 0;
 }
