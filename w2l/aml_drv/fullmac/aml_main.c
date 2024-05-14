@@ -6037,7 +6037,7 @@ static void aml_set_regdom_wq(struct wiphy *wiphy,
                               struct regulatory_request *request)
 {
     struct aml_wq *aml_wq;
-    aml_wq = aml_wq_alloc(1);
+    aml_wq = aml_wq_alloc(sizeof(struct regulatory_request *));
     if (!aml_wq) {
         AML_INFO("alloc wq out of memory");
         return;
