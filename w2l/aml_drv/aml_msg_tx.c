@@ -417,13 +417,6 @@ static int aml_send_msg(struct aml_hw *aml_hw, const void *msg_params,
         return 0;
     }
 #endif
-
-    printk("chong: %s %d, msg->param_len = %d\n", __func__, __LINE__, msg->param_len);
-    if (msg->param_len != 0)
-    {
-        printk("chong: %s %d, tag = %d\n", __func__, __LINE__, *(msg->param));
-    }
-
     if ((aml_hw->state > WIFI_SUSPEND_STATE_NONE || g_pci_msg_suspend)
         && ((msg->param_len != 0) && (*(msg->param) != MM_SUB_SET_SUSPEND_REQ))
         && ((msg->param_len != 0) && (*(msg->param) != MM_SUB_SCANU_CANCEL_REQ && (*(msg->param) != MM_SUB_SHUTDOWN)))
@@ -471,6 +464,7 @@ static int aml_send_msg(struct aml_hw *aml_hw, const void *msg_params,
 
     cmd = kzalloc(sizeof(struct aml_cmd), nonblock ? GFP_ATOMIC : GFP_KERNEL);
     if (!cmd) {
+        AML_PRINT(AML_DBG_MODULES_MSG_TX, KERN_CRIT "%s: cmd alloc fail\n", __func__);
         kfree(msg);
         return -ENOMEM;
     }
@@ -654,6 +648,10 @@ int aml_send_add_if(struct aml_hw *aml_hw, const unsigned char *mac,
 
     /* Send the ADD_IF_REQ message to LMAC FW */
     /* coverity[leaked_storage] - add_if_req_param will be freed later */
+    if ((aml_hw->wfd_present) && add_if_req_param->p2p) {
+        AML_INFO("wdf is present");
+        add_if_req_param->type |= BIT(7);
+    }
     return aml_send_msg(aml_hw, add_if_req_param, 1, MM_ADD_IF_CFM, cfm);
 }
 
@@ -2588,6 +2586,14 @@ int aml_send_scanu_req(struct aml_hw *aml_hw, struct aml_vif *aml_vif,
             aml_hw->plat->hif_sdio_ops->hi_random_ram_write((unsigned char *)param->ie, (unsigned char *)SCANU_ADD_IE, param->ie_len);
         }
 
+        if ((aml_vif->vif_index == AML_P2P_DEVICE_VIF_IDX)) {
+            if (aml_get_wfd_ie_offset((unsigned char *)param->ie, param->ie_len, 0)) {
+                aml_hw->wfd_present = true;
+            }
+            else {
+                aml_hw->wfd_present = false;
+            }
+        }
     } else {
         req->add_ie_len = 0;
         req->add_ies = 0;
@@ -3412,7 +3418,10 @@ int aml_send_me_shutdown(struct aml_hw *aml_hw)
                 __func__, __LINE__, msg_recv );
             return ret;
         }
-    }while (!msg_recv);
+    } while (!msg_recv);
+
+    if (aml_bus_type == SDIO_MODE)
+        while (aml_disable_sdio_irq(aml_hw));
 
     AML_PRINT(AML_DBG_MODULES_MSG_TX, "%s %d, shutdown_msg_send_ok! \n",__func__, __LINE__);
 
@@ -3819,23 +3828,20 @@ int aml_fw_reset(struct aml_vif *aml_vif)
     return aml_priv_send_msg(aml_hw, req, 0, 0, NULL);
 }
 
-int _aml_set_macbypass(struct aml_vif *aml_vif, int format_type, int bandwidth, int rate, int siso_or_mimo)
+int _aml_set_macbypass(struct aml_vif *aml_vif, unsigned int dpd_cfg)
 {
     struct aml_hw *aml_hw = aml_vif->aml_hw;
-    struct set_macbypass *macbypass = NULL;
+    unsigned int *p_dpd_gain = NULL;
 
-    macbypass = aml_priv_msg_zalloc(MM_SUB_SET_MACBYPASS, sizeof(struct set_macbypass));
-    if (!macbypass)
+    p_dpd_gain = aml_priv_msg_zalloc(MM_SUB_SET_MACBYPASS, sizeof(unsigned int));
+    if (!p_dpd_gain)
         return -ENOMEM;
 
-    memset((void *)macbypass, 0,sizeof(struct set_macbypass));
-    macbypass->format_type = (u8_l)format_type;
-    macbypass->bandwidth = (u8_l)bandwidth;
-    macbypass->rate = (u8_l)rate;
-    macbypass->siso_or_mimo = (u8_l)siso_or_mimo;
+    memset((void *)p_dpd_gain, 0, sizeof(unsigned int));
+    *p_dpd_gain = dpd_cfg;
 
     /* coverity[leaked_storage] - macbypass will be freed later */
-    return aml_priv_send_msg(aml_hw, macbypass, 0, 0, NULL);
+    return aml_priv_send_msg(aml_hw, p_dpd_gain, 0, 0, NULL);
 }
 
 int _aml_set_stop_macbypass(struct aml_vif *aml_vif)
@@ -4385,3 +4391,33 @@ int _aml_set_la_enable(struct aml_hw *aml_hw, int value)
 
     return aml_priv_send_msg(aml_hw, la_status, 0, 0, NULL);
 }
+
+int aml_set_mcc_ratio(struct aml_vif *aml_vif, int ratio)
+{
+    struct aml_hw *aml_hw = aml_vif->aml_hw;
+    struct mcc_ratio_req *mcc_ratio_param;
+
+    mcc_ratio_param = aml_priv_msg_zalloc(MM_SUB_SET_MCC_RATIO, sizeof(struct mcc_ratio_req));
+    if (!mcc_ratio_param)
+        return -ENOMEM;
+
+    mcc_ratio_param->mcc_ratio = ratio;
+    AML_INFO("ratio:%d", ratio);
+    /* coverity[leaked_storage] - mcc_ratio_param will be freed later */
+    return aml_priv_send_msg(aml_hw, mcc_ratio_param, 0, 0, NULL);
+}
+
+int aml_set_wfa_rts_based_txop(struct aml_vif *aml_vif, int enable)
+{
+    struct aml_hw *aml_hw = aml_vif->aml_hw;
+    struct wfa_test_req *wfa_test_param = NULL;
+
+    wfa_test_param = aml_priv_msg_zalloc(MM_SUB_SET_WFA_INFO, sizeof(struct wfa_test_req));
+    if (!wfa_test_param)
+        return -ENOMEM;
+
+    wfa_test_param->wfa_rts_based_txop_dur = enable;
+
+    return aml_priv_send_msg(aml_hw, wfa_test_param, 0, 0, NULL);
+}
+

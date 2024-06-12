@@ -33,6 +33,9 @@ static void aml_send_tcp_ack(struct aml_tcp_ack_tx *tx_info)
     struct aml_vif *aml_vif = tx_info->aml_vif;
     struct aml_txq *txq;
     struct aml_hw *aml_hw = aml_vif->aml_hw;
+    u8 hw_calc = 0;
+    u8 is_frag = 0;
+
     sw_txhdr = kmem_cache_alloc(aml_hw->sw_txhdr_cache, GFP_ATOMIC);
     if (unlikely(sw_txhdr == NULL))
         goto free;
@@ -56,6 +59,8 @@ static void aml_send_tcp_ack(struct aml_tcp_ack_tx *tx_info)
         goto free;
     }
 #endif
+    if (aml_bus_type == SDIO_MODE)
+        sdio_checksum_process(aml_hw, skb, &hw_calc, &is_frag);
 
     /* Prepare IPC buffer for DMA transfer */
     eth = (struct ethhdr *)skb->data;
@@ -107,10 +112,16 @@ static void aml_send_tcp_ack(struct aml_tcp_ack_tx *tx_info)
             sdio_txhdr = (struct aml_sdio_txhdr *)skb_push(skb, AML_SDIO_TX_HEADROOM);
             sdio_txhdr->sw_hdr = sw_txhdr;
             sdio_txhdr->mpdu_buf_flag = 0;
-            sdio_txhdr->mpdu_buf_flag = HW_FIRST_MPDUBUF_FLAG | HW_LAST_MPDUBUF_FLAG | HW_LAST_AGG_FLAG;
-            sdio_txhdr->mpdu_buf_flag |= HW_MPDU_LEN_SET(sw_txhdr->frame_len + sizeof(struct txdesc_host) + SDIO_FRAME_TAIL_LEN);
-
-            memset(&sdio_txhdr->desc, 0, sizeof(struct txdesc_host)/*8 byte alignment*/);
+            sdio_txhdr->mpdu_buf_flag = HW_FIRST_MPDUBUF_FLAG | HW_LAST_MPDUBUF_FLAG | HW_FIRST_AGG_FLAG | HW_LAST_AGG_FLAG;
+            sdio_txhdr->mpdu_buf_flag |= HW_MPDU_LEN_SET(sw_txhdr->frame_len + SDIO_FRAME_TAIL_LEN);
+            sdio_txhdr->cksum_flag = SDIO_TX_CKSUM_DATA_FLAG;
+            if (hw_calc) {
+                sdio_txhdr->cksum_flag |= SDIO_TX_CKSUM_ENABLE;
+            }
+            if (is_frag) {
+                sdio_txhdr->cksum_flag |= SDIO_TX_CKSUM_FRAG_FLAG;
+            }
+            memset(&sdio_txhdr->desc, 0, sizeof(struct txdesc_host) + AMSDU_LLC_LEN /*8 byte alignment*/);
         }
 
     }
@@ -123,7 +134,7 @@ static void aml_send_tcp_ack(struct aml_tcp_ack_tx *tx_info)
     spin_lock_bh(&aml_hw->tx_lock);
 
     if (txq->idx == TXQ_INACTIVE) {
-        trace_printk("%s:%d Get txq idx is inactive after spin_lock_bh	\n", __func__, __LINE__);
+        printk("%s:%d Get txq idx is inactive after spin_lock_bh	\n", __func__, __LINE__);
         //"do not push and process it with kernel list lib it whill be re-pull out and used this freed buf"
         spin_unlock_bh(&aml_hw->tx_lock);
         goto free;

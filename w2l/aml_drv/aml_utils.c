@@ -57,9 +57,10 @@ static int aml_ipc_buf_pool_alloc(struct aml_hw *aml_hw,
     int i;
 
     pool->nb = 0;
+    nb++;
 
     /* allocate buf array */
-    pool->buffers = kmalloc(nb * sizeof(struct aml_ipc_buf), GFP_KERNEL);
+    pool->buffers = kzalloc(nb * sizeof(struct aml_ipc_buf), GFP_KERNEL);
     if (!pool->buffers) {
         dev_err(aml_hw->dev, "Allocation of buffer array for %s failed\n",
                 pool_name);
@@ -86,6 +87,7 @@ static int aml_ipc_buf_pool_alloc(struct aml_hw *aml_hw,
         }
         if (!buf->dma_addr) {
             AML_PRINT(AML_DBG_MODULES_UTILS, "err:dma_addr null \n");
+            continue;
         }
         pool->nb++;
 
@@ -94,6 +96,9 @@ static int aml_ipc_buf_pool_alloc(struct aml_hw *aml_hw,
 
         /* push it to FW */
         push(aml_hw->ipc_env, buf);
+
+        if (pool->nb == (nb - 1))
+            break;
     }
 
     return 0;
@@ -112,8 +117,10 @@ static void aml_ipc_buf_pool_dealloc(struct aml_ipc_buf_pool *pool)
     struct aml_ipc_buf *buf;
     int i;
 
-    for (i = 0, buf = pool->buffers; i < pool->nb ; buf++, i++) {
-        dma_pool_free(pool->pool, buf->addr, buf->dma_addr);
+    for (i = 0, buf = pool->buffers; i < (pool->nb + 1) ; buf++, i++) {
+        if (buf->addr) {
+            dma_pool_free(pool->pool, buf->addr, buf->dma_addr);
+        }
     }
     pool->nb = 0;
 
@@ -1191,6 +1198,7 @@ int aml_tx_task(void *data)
     uint32_t  dynabuf_size = 0;
     struct tx_amsdu_param *txamsdu = NULL;
     unsigned int blk_size = 512;
+    struct ethhdr *amsdu_hdr;
     bool sdio_bus_block = false;
     unsigned char func_num = 0;
     int addr = 0;
@@ -1254,9 +1262,9 @@ int aml_tx_task(void *data)
 
         if (aml_bus_type == SDIO_MODE) {
             if (aml_hw->rx_buf_state & FW_BUFFER_EXPAND) {
-                if (aml_hw->g_tx_param.tx_page_free_num > SDIO_TX_PAGE_NUM_SMALL) {
-                  AML_INFO("%s, %d, page_free=%d, tot_page=%d\n", __func__, __LINE__, aml_hw->g_tx_param.tx_page_free_num, aml_hw->g_tx_param.tx_page_tot_num);
-                }
+                 if (aml_hw->g_tx_param.tx_page_free_num > SDIO_TX_PAGE_NUM_SMALL) {
+                     AML_INFO("%s, %d, page_free=%d, tot_page=%d\n", __func__, __LINE__, aml_hw->g_tx_param.tx_page_free_num, aml_hw->g_tx_param.tx_page_tot_num);
+                 }
             }
         }
         spin_lock_bh(&aml_hw->tx_desc_lock);
@@ -1278,11 +1286,15 @@ int aml_tx_task(void *data)
                 for (i = 0; i < txdesc_host->api.host.packet_cnt; i++) {
                     frame_tot_len += txdesc_host->api.host.packet_len[i];
                 }
-                #if 0
+                sdio_txhdr = (struct aml_sdio_txhdr *)sw_txhdr->skb->data;
+                if (sdio_txhdr->cksum_flag & SDIO_TX_CKSUM_DATA_FLAG) {
+                    if (txdesc_host->api.host.packet_cnt > 1) {
+                        frame_tot_len += AMSDU_LLC_LEN;
+                    } else {
+                        frame_tot_len += LLC_LEN;
+                    }
+                }
                 page_num = howmanypage(frame_tot_len + SDIO_DATA_OFFSET + SDIO_FRAME_TAIL_LEN, SDIO_PAGE_LEN);
-                #else
-                page_num = sw_txhdr->desc.api.host.packet_cnt; //the total of amsdu
-                #endif
             }
 
             if (((page_num + 1)  <= aml_hw->g_tx_param.tx_page_free_num)
@@ -1313,17 +1325,27 @@ int aml_tx_task(void *data)
 #endif
 
                 if (aml_bus_type == SDIO_MODE) {
-#if 0
+
                     if (sw_txhdr->desc.api.host.flags & TXU_CNTRL_AMSDU) {
                         struct aml_amsdu_txhdr *amsdu_txhdr, *tmp;
                         sdio_txhdr = (struct aml_sdio_txhdr *)sw_txhdr->skb->data;
                         sdio_txhdr->mpdu_buf_flag = 0;
-                        sdio_txhdr->mpdu_buf_flag = HW_FIRST_MPDUBUF_FLAG|HW_LAST_MPDUBUF_FLAG|HW_LAST_AGG_FLAG;
+                        sdio_txhdr->mpdu_buf_flag = HW_FIRST_MPDUBUF_FLAG|HW_LAST_MPDUBUF_FLAG|HW_FIRST_AGG_FLAG|HW_LAST_AGG_FLAG;
                         sdio_txhdr->mpdu_buf_flag |= HW_MPDU_LEN_SET(frame_tot_len + SDIO_FRAME_TAIL_LEN);
+                        sdio_txhdr->cksum_flag |= SDIO_TX_CKSUM_AMSDU_FLAG;
                         frm = (unsigned char *)sw_txhdr->skb->data + sizeof(struct aml_txhdr);
 
                         memcpy(frm + TXDESC_OFFSET, txdesc_host, sizeof(*txdesc_host));
-                        amsdu_len = sw_txhdr->frame_len + SDIO_TXHEADER_LEN;
+
+                        amsdu_hdr = (struct ethhdr *)(frm + SDIO_TXHEADER_LEN);
+                        memcpy(amsdu_hdr->h_dest, &txdesc_host->api.host.eth_dest_addr, ETH_ALEN);
+                        memcpy(amsdu_hdr->h_source, &txdesc_host->api.host.eth_src_addr, ETH_ALEN);
+                        amsdu_hdr->h_proto = htons(sw_txhdr->frame_len + sizeof(rfc1042_header) + 2);
+
+                        memcpy(frm + AMSDU_LLC_OFFSET, rfc1042_header, sizeof(rfc1042_header));
+                        memcpy(frm + AMSDU_LLC_OFFSET + 6, &txdesc_host->api.host.ethertype, 2);
+                        amsdu_len = sw_txhdr->frame_len + SDIO_TXHEADER_LEN + AMSDU_LLC_LEN;
+
 #ifdef CONFIG_SDIO_TX_ENH
 #ifdef SDIO_TX_ENH_DBG
                         blog.tx_amsdu_cnt++;
@@ -1375,10 +1397,25 @@ int aml_tx_task(void *data)
                             AML_PRINT(AML_DBG_MODULES_UTILS, "*************%s:%d, malloc amsdu dynabuf failed****************\n", __func__, __LINE__);
                             break;
                         }
-                        frm = (unsigned char *)sw_txhdr->skb->data + sizeof(struct aml_txhdr);
-                        memcpy(frm + TXDESC_OFFSET, txdesc_host, sizeof(*txdesc_host));
-                        memcpy(amsdu_dynabuf[dynabuf_id], frm, sw_txhdr->frame_len + SDIO_TXHEADER_LEN  + SDIO_FRAME_TAIL_LEN);
-                        aml_hw->g_tx_param.scat_req->scat_list[aml_hw->g_tx_param.mpdu_num].len = sw_txhdr->frame_len + SDIO_TXHEADER_LEN  + SDIO_FRAME_TAIL_LEN;
+                        sdio_txhdr = (struct aml_sdio_txhdr *)sw_txhdr->skb->data;
+                        if (sdio_txhdr->cksum_flag & SDIO_TX_CKSUM_DATA_FLAG) {
+                            sdio_txhdr->mpdu_buf_flag = 0;
+                            sdio_txhdr->mpdu_buf_flag = HW_FIRST_MPDUBUF_FLAG|HW_LAST_MPDUBUF_FLAG|HW_FIRST_AGG_FLAG|HW_LAST_AGG_FLAG;
+                            sdio_txhdr->mpdu_buf_flag |= HW_MPDU_LEN_SET(frame_tot_len + SDIO_FRAME_TAIL_LEN);
+
+                            frm = (unsigned char *)sw_txhdr->skb->data + sizeof(struct aml_txhdr);
+                            memcpy(frm + TXDESC_OFFSET, txdesc_host, sizeof(*txdesc_host));
+                            memcpy(amsdu_dynabuf[dynabuf_id], frm, SDIO_TXHEADER_LEN);
+                            memcpy(amsdu_dynabuf[dynabuf_id] + SDIO_TXHEADER_LEN, rfc1042_header, sizeof(rfc1042_header));
+                            memcpy(amsdu_dynabuf[dynabuf_id] + SDIO_TXHEADER_LEN + 6, &txdesc_host->api.host.ethertype, 2);
+                            memcpy(amsdu_dynabuf[dynabuf_id] + SDIO_TXHEADER_LEN + LLC_LEN, frm + SDIO_TXHEADER_LEN + AMSDU_LLC_LEN, sw_txhdr->frame_len);
+                            aml_hw->g_tx_param.scat_req->scat_list[aml_hw->g_tx_param.mpdu_num].len = frame_tot_len + SDIO_TXHEADER_LEN + SDIO_FRAME_TAIL_LEN;
+                        } else {
+                            frm = (unsigned char *)sw_txhdr->skb->data + sizeof(struct aml_txhdr);
+                            memcpy(frm + TXDESC_OFFSET, txdesc_host, sizeof(*txdesc_host));
+                            memcpy(amsdu_dynabuf[dynabuf_id], frm, sw_txhdr->frame_len + SDIO_TXHEADER_LEN  + SDIO_FRAME_TAIL_LEN);
+                            aml_hw->g_tx_param.scat_req->scat_list[aml_hw->g_tx_param.mpdu_num].len = frame_tot_len + SDIO_TXHEADER_LEN  + SDIO_FRAME_TAIL_LEN;
+                        }
                         aml_hw->g_tx_param.scat_req->scat_list[aml_hw->g_tx_param.mpdu_num].packet = amsdu_dynabuf[dynabuf_id];
                         aml_hw->g_tx_param.scat_req->scat_list[aml_hw->g_tx_param.mpdu_num].page_num = page_num;
                         aml_hw->g_tx_param.scat_req->scat_count++;
@@ -1387,37 +1424,6 @@ int aml_tx_task(void *data)
                         aml_hw->g_tx_param.mpdu_num++;
                         dynabuf_id = (dynabuf_id + 1) % 256;
                     }
-#else
-
-                    frm = (unsigned char *)sw_txhdr->skb->data + sizeof(struct aml_txhdr);
-                    memcpy(frm + TXDESC_OFFSET, txdesc_host, sizeof(*txdesc_host));
-                    aml_hw->g_tx_param.scat_req->scat_list[aml_hw->g_tx_param.mpdu_num].len = sw_txhdr->frame_len + SDIO_TXHEADER_LEN  + SDIO_FRAME_TAIL_LEN;
-                    aml_hw->g_tx_param.scat_req->scat_list[aml_hw->g_tx_param.mpdu_num].page_num = 1; //a packet consume one page mostly
-                    aml_hw->g_tx_param.scat_req->scat_list[aml_hw->g_tx_param.mpdu_num].packet = frm;
-                    aml_hw->g_tx_param.scat_req->scat_count++;
-                    aml_hw->g_tx_param.scat_req->len += aml_hw->g_tx_param.scat_req->scat_list[aml_hw->g_tx_param.mpdu_num].len;
-                    //AML_PRINT(AML_DBG_MODULES_UTILS, "%s, skb=%p, hostid=%x\n",  __func__, sw_txhdr->skb, txdesc_host->api.host.hostid);
-                    //AML_PRINT(AML_DBG_MODULES_UTILS, "frame_len=%x,len=%x, scat_count=%x, hostid=%x, Reserve=%x\n", sw_txhdr->frame_len,scat_req->scat_list[mpdu_num].len, scat_req->scat_count, tx_option->hostid, tx_option->Reserve);
-                    aml_hw->g_tx_param.mpdu_num++;
-                    #ifdef CONFIG_AML_AMSDUS_TX
-                    if (txdesc_host->api.host.flags & TXU_CNTRL_AMSDU) {
-                        struct aml_amsdu_txhdr *amsdu_txhdr, *tmp;
-                        list_for_each_entry_safe(amsdu_txhdr, tmp, &sw_txhdr->amsdu.hdrs, list) {
-                            msdu_len = amsdu_txhdr->msdu_len + sizeof(struct ethhdr) + amsdu_txhdr->pad;
-                            frm = (unsigned char *)amsdu_txhdr->skb->data + sizeof(*amsdu_txhdr) + sizeof(struct ethhdr);
-                            page_num = 1;
-                            aml_hw->g_tx_param.scat_req->scat_list[aml_hw->g_tx_param.mpdu_num].len = msdu_len + 4;
-                            aml_hw->g_tx_param.scat_req->scat_list[aml_hw->g_tx_param.mpdu_num].page_num = page_num;
-
-                            aml_hw->g_tx_param.scat_req->scat_list[aml_hw->g_tx_param.mpdu_num].packet = frm;
-                            aml_hw->g_tx_param.scat_req->scat_count++;
-                            aml_hw->g_tx_param.scat_req->len += aml_hw->g_tx_param.scat_req->scat_list[aml_hw->g_tx_param.mpdu_num].len;
-                            aml_hw->g_tx_param.mpdu_num++;
-                        }
-                    }
-                    #endif
-
-#endif
                 } else {
 #ifdef CONFIG_AML_USB_LARGE_PAGE
                     frm = (unsigned char *)sw_txhdr->skb->data + sizeof(struct aml_txhdr);
@@ -1538,14 +1544,12 @@ int aml_tx_task(void *data)
 
             if (aml_bus_type == SDIO_MODE) {
                 aml_hw->plat->hif_sdio_ops->hi_send_frame(aml_hw->g_tx_param.scat_req);
-                #if 0
                 for (i = 0; i < dynabuf_id; i++) {
                     if (amsdu_dynabuf[i]) {
                         kfree(amsdu_dynabuf[i]);
                     }
                 }
                 dynabuf_id = 0;
-                #endif
             } else {
                 aml_hw->plat->hif_ops->hi_send_frame(aml_hw->g_tx_param.scat_req);
                 #ifdef CONFIG_AML_USB_LARGE_PAGE
@@ -2305,17 +2309,20 @@ int aml_traceind(void *pthis)
 
     memset(trace_log_file_info.ptr, 0, 33*1024);
     ptr_flag = trace_log_file_info.ptr;
+
 #endif
     if (aml_bus_type == USB_MODE) {
-        aml_hw->plat->hif_ops->hi_read_sram((unsigned char *)ptr_flag, (unsigned char *)(SYS_TYPE)TRACE_USB_DCCM_END_ADDR, TRACE_TOTAL_SIZE, USB_EP4);
+        /* 4: read end addr in dccm*/
+        aml_hw->plat->hif_ops->hi_read_sram((unsigned char *)ptr_flag, (unsigned char *)(SYS_TYPE)TRACE_USB_DCCM_END_ADDR, TRACE_TOTAL_SIZE + 4, USB_EP4);
     } else if (aml_bus_type == SDIO_MODE) {
-        aml_hw->plat->hif_sdio_ops->hi_random_ram_read((unsigned char *)ptr_flag, (unsigned char *)(SYS_TYPE)TRACE_SRAM_END_ADDR,TRACE_TOTAL_SIZE + 4);
+        aml_hw->plat->hif_sdio_ops->hi_random_ram_read((unsigned char *)ptr_flag, (unsigned char *)(SYS_TYPE)TRACE_SDIO_SRAM_END_ADDR, TRACE_TOTAL_SIZE + 4);
     }
 
     memcpy(&end, ptr_flag, sizeof(end));
     ptr_flag += 2;
 
     while (end != flag_end) {
+        //AML_PRINT(AML_DBG_MODULES_TRACE, "end:%x flag_end:%x \n", end, flag_end);
         if (end < flag_end) {
             ptr_limit = ptr_flag + TRACE_MAX_SIZE;
             ptr_flag += flag_end;
@@ -2500,7 +2507,11 @@ void aml_ipc_tx_drain(struct aml_hw *aml_hw)
         ieee80211_free_txskb(aml_hw->hw, skb);
 #else
         if (aml_bus_type == SDIO_MODE) {
-            skb_pull(skb, AML_SDIO_TX_HEADROOM);
+            if (sw_txhdr->desc.api.host.flags & TXU_CNTRL_MGMT) {
+                skb_pull(skb, AML_SDIO_TX_HEADROOM - AMSDU_LLC_LEN);
+            } else {
+                skb_pull(skb, AML_SDIO_TX_HEADROOM);
+            }
         } else if (aml_bus_type == USB_MODE) {
             skb_pull(skb, AML_USB_TX_HEADROOM);
         } else {

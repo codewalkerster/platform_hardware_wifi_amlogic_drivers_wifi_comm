@@ -136,6 +136,16 @@ enum {
     AML_MEM_DUMP_UPLOAD,
 };
 
+struct log_nl_msg_info {
+    int msg_type;
+    int msg_len;
+};
+
+struct aml_trace_nl_info {
+    struct sock * fw_log_sock;
+    int user_pid;
+    int enable;
+};
 
 int aml_fw_trace_init(struct aml_fw_trace *trace,
                        struct aml_fw_trace_ipc_desc *ipc);

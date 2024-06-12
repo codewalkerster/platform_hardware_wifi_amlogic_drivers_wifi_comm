@@ -51,6 +51,7 @@ extern unsigned char g_pci_msg_suspend;
 extern unsigned char g_sdio_after_porbe;
 extern unsigned char g_usb_after_probe;
 extern unsigned char wifi_drv_rmmod_ongoing;
+extern struct urb * auc_alloc_urb(int iso_packets, gfp_t mem_flags);
 
 #ifndef CONFIG_AML_FPGA_PCIE
 extern struct pcie_mem_map_struct pcie_ep_addr_range[PCIE_TABLE_NUM];
@@ -1906,7 +1907,10 @@ int aml_sdio_platform_on(struct aml_hw *aml_hw, void *config)
         if ((ret = start_wifi()))
             return ret;
     } else {
-        aml_download_wifi_fw_img(AML_MAC_FW_SDIO);
+        ret = aml_download_wifi_fw_img(AML_MAC_FW_SDIO);
+        if (!ret) {
+            return -1;
+        }
     }
 
     shared_ram = (u8 *)SHARED_RAM_SDIO_START_ADDR;
@@ -1941,16 +1945,7 @@ int aml_sdio_platform_on(struct aml_hw *aml_hw, void *config)
         }
 #endif
     };
-
-
-    /* XOSC manual cali setting while running when power on, it will be no useful after eco repair */
-    if (bus_state_detect.is_recy_ongoing) {
-        if (aml_recy->reason == RECY_REASON_CODE_BUS_ERR)
-            manual_cali_config(aml_plat);
-
-    } else {
-        manual_cali_config(aml_plat);
-    }
+    AML_REG_WRITE(0x00, aml_plat, AML_ADDR_MAC_PHY, REG_OF_VENDOR_ID);
 
     //AML_PRINT(AML_DBG_MODULES_PLATF, "%s:%d, value %x", __func__, __LINE__, aml_pci_readl(aml_plat->get_address(aml_plat, AML_ADDR_MAC_PHY, 0x00a070b4)));
 #ifndef CONFIG_PT_MODE
@@ -1995,7 +1990,7 @@ int aml_sdio_platform_on(struct aml_hw *aml_hw, void *config)
             return -ENOMEM;
         }
 
-        aml_hw->g_urb = usb_alloc_urb(0, GFP_ATOMIC);
+        aml_hw->g_urb = auc_alloc_urb(0, GFP_ATOMIC);
         if (!aml_hw->g_urb) {
             FREE(aml_hw->g_buffer, "fw_stat");
             FREE(aml_hw->g_cr, "fw_stat");
@@ -2258,9 +2253,15 @@ int aml_pci_platform_on(struct aml_hw *aml_hw, void *config)
     {
         if (aml_hw->plat->disable)
             aml_hw->plat->disable(aml_hw);
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0) // template solution for S905L3A
 #ifndef CONFIG_AML_USE_TASK
         tasklet_kill(&aml_hw->task);
 #endif
+#else
+        tasklet_kill(&aml_hw->task);
+#endif
+
         aml_ipc_deinit(aml_hw);
         return ret;
     }
@@ -2329,7 +2330,11 @@ void aml_platform_off(struct aml_hw *aml_hw, void **config)
     if (aml_hw->plat->disable)
         aml_hw->plat->disable(aml_hw);
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0) // template solution for S905L3A
 #ifndef CONFIG_AML_USE_TASK
+    tasklet_kill(&aml_hw->task);
+#endif
+#else
     tasklet_kill(&aml_hw->task);
 #endif
 
@@ -2440,9 +2445,11 @@ static u32 aml_pci_ack_irq(struct aml_hw *aml_hw)
         reg_val[0] = (aml_hw->g_buffer[3] << 24) | (aml_hw->g_buffer[2] << 16) | (aml_hw->g_buffer[1] << 8) | (aml_hw->g_buffer[0]);
         reg_val[1] = (aml_hw->g_buffer[7] << 24) | (aml_hw->g_buffer[6] << 16) | (aml_hw->g_buffer[5] << 8) | (aml_hw->g_buffer[4]);
         memset(aml_hw->g_buffer, 0, 2 * sizeof(int));
+
     } else if (aml_bus_type == SDIO_MODE) {
         aml_hw->plat->hif_sdio_ops->hi_desc_read((unsigned char *)(unsigned long)reg_val,
                 (unsigned char *)(unsigned long)RG_WIFI_IF_FW2HST_IRQ_CFG, sizeof(reg_val));
+
     } else {
        reg_val[1] = AML_REG_READ(aml_hw->plat, AML_ADDR_MAC_PHY, ISTATUS_HOST);
        // clean pci irq status
@@ -2451,7 +2458,7 @@ static u32 aml_pci_ack_irq(struct aml_hw *aml_hw)
 
     if (aml_bus_type != PCIE_MODE) {
         buf_state = reg_val[0] & FW_BUFFER_STATUS;
-        if (buf_state && ((aml_hw->rx_buf_state & FW_BUFFER_STATUS) != (buf_state & FW_BUFFER_STATUS))) {
+        if (buf_state) {
             aml_hw->rx_buf_state &= ~FW_BUFFER_STATUS;
             if (buf_state & FW_BUFFER_NARROW) {
                 aml_hw->rx_buf_state |= buf_state | BUFFER_NARROW;
@@ -2501,8 +2508,9 @@ int aml_platform_register_usb_drv(void)
     aml_platform_init(aml_plat, &drv_data);
     dev_set_drvdata(&aml_plat->usb_dev->dev, drv_data);
     bus_state_detect.is_drv_load_finished = 1;
+#ifdef CONFIG_AML_DEBUGFS
     aml_log_nl_init();
-
+#endif
     return ret;
 }
 
@@ -2513,7 +2521,9 @@ void aml_platform_unregister_usb_drv(void)
 
     AML_DBG(AML_FN_ENTRY_STR);
 
+#ifdef CONFIG_AML_DEBUGFS
     aml_log_nl_destroy();
+#endif
     aml_hw = dev_get_drvdata(&g_udev->dev);
     if (aml_hw == NULL)
         goto err_drvdata;
@@ -2586,6 +2596,7 @@ static int aml_pci_platform_disable(struct aml_hw *aml_hw)
     return 0;
 }
 
+unsigned char aml_platform_init_ok = 1;
 int aml_platform_register_sdio_drv(void)
 {
     int ret = 0;
@@ -2618,15 +2629,16 @@ int aml_platform_register_sdio_drv(void)
 
     ret = aml_platform_init(aml_plat, &drv_data);
     if (ret) {
-       kfree(aml_plat);
+        aml_platform_init_ok = 0;
+        kfree(aml_plat);
 #ifdef CONFIG_PT_MODE
-       return ret;
+        return ret;
 #endif
-       if (!bus_state_detect.is_load_by_timer && !bus_state_detect.bus_reset_ongoing) {
-           bus_state_detect.bus_err = 2;
-       }
-       AML_INFO("aml_platform_init error, ret: %d !!!\n", ret);
-       return 0;
+        if (!bus_state_detect.is_load_by_timer && !bus_state_detect.bus_reset_ongoing) {
+            bus_state_detect.bus_err = 2;
+        }
+        AML_INFO("aml_platform_init error, ret: %d !!!\n", ret);
+        return 0;
     }
     dev_set_drvdata(&func->dev, drv_data);
 
@@ -2634,8 +2646,9 @@ int aml_platform_register_sdio_drv(void)
     g_mmc_misc = kmalloc(sizeof(struct mmc_misc) * RXDESC_CNT_READ_ONCE, GFP_ATOMIC);
 #endif
     bus_state_detect.is_drv_load_finished = 1;
+#ifdef CONFIG_AML_DEBUGFS
     aml_log_nl_init();
-
+#endif
     return ret;
 }
 
@@ -2647,20 +2660,25 @@ void aml_platform_unregister_sdio_drv(void)
 
     AML_DBG(AML_FN_ENTRY_STR);
 
+#ifdef CONFIG_AML_DEBUGFS
     aml_log_nl_destroy();
-    aml_hw = dev_get_drvdata(&func->dev);
-    if (aml_hw == NULL)
-        goto err_drvdata;
+#endif
 
-    aml_plat = aml_hw->plat;
-    aml_platform_deinit(aml_hw);
+    if (aml_platform_init_ok) {
+        aml_hw = dev_get_drvdata(&func->dev);
+        if (aml_hw == NULL)
+            goto err_drvdata;
+
+        aml_plat = aml_hw->plat;
+        aml_platform_deinit(aml_hw);
+    }
+
     wifi_drv_rmmod_ongoing = 1;
     bus_state_detect.is_drv_load_finished = 0;
 err_drvdata:
     kfree(aml_plat);
     dev_set_drvdata(&func->dev, NULL);
 }
-
 
 u8* aml_pci_get_map_address(struct net_device *dev, unsigned int offset)
 {

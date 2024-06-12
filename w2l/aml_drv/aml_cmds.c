@@ -113,8 +113,10 @@ int aml_msg_task(void *data)
             trace_msg_send(cmd->id);
             aml_ipc_msg_push(aml_hw, cmd, AML_CMD_A2EMSG_LEN(cmd->a2e_msg));
             spin_lock_bh(&cmd_mgr->lock);
-            if (cmd->a2e_msg)
+            if (cmd->a2e_msg) {
                 kfree(cmd->a2e_msg);
+                cmd->a2e_msg = NULL;
+            }
             spin_unlock_bh(&cmd_mgr->lock);
         }
     }
@@ -221,6 +223,7 @@ static int cmd_mgr_queue(struct aml_cmd_mgr *cmd_mgr, struct aml_cmd *cmd)
         } else {
             aml_ipc_msg_push(aml_hw, cmd, AML_CMD_A2EMSG_LEN(cmd->a2e_msg));
             kfree(cmd->a2e_msg);
+            cmd->a2e_msg = NULL;
         }
     }
 
@@ -341,6 +344,7 @@ static int cmd_mgr_llind(struct aml_cmd_mgr *cmd_mgr, struct aml_cmd *cmd)
                 next->flags &= ~AML_CMD_FLAG_WAIT_PUSH;
                 aml_ipc_msg_push(aml_hw, next, AML_CMD_A2EMSG_LEN(next->a2e_msg));
                 kfree(next->a2e_msg);
+                cmd->a2e_msg = NULL;
             }
         }
     }
@@ -416,6 +420,7 @@ static int cmd_mgr_msgind(struct aml_cmd_mgr *cmd_mgr, struct aml_cmd_e2amsg *ms
             next->flags &= ~AML_CMD_FLAG_WAIT_PUSH;
             aml_ipc_msg_push(aml_hw, next, AML_CMD_A2EMSG_LEN(next->a2e_msg));
             kfree(next->a2e_msg);
+            cmd->a2e_msg = NULL;
         }
     } else {
         if (found && (next != NULL) && (next->flags & AML_CMD_FLAG_WAIT_PUSH)) {
@@ -470,8 +475,10 @@ static void cmd_mgr_drain(struct aml_cmd_mgr *cmd_mgr)
             complete(&cur->complete);
 
         if (cur->flags & AML_CMD_FLAG_WAIT_PUSH) {
-            if (cur->a2e_msg)
+            if (cur->a2e_msg) {
                 kfree(cur->a2e_msg);
+                cur->a2e_msg = NULL;
+            }
 
             kfree(cur);
         }

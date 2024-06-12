@@ -221,7 +221,7 @@ int aml_set_cali_param_req(struct aml_hw *aml_hw, struct Cali_Param *cali_param)
 int aml_fw_reset(struct aml_vif *aml_vif);
 int _aml_get_efuse(struct aml_vif *aml_vif, u32 addr);
 int _aml_set_efuse(struct aml_vif *aml_vif, u32 addr, u32 value);
-int _aml_set_macbypass(struct aml_vif *aml_vif, int format_type, int bandwidth, int rate, int siso_or_mimo);
+int _aml_set_macbypass(struct aml_vif *aml_vif, unsigned int dpd_cfg);
 int _aml_set_stop_macbypass(struct aml_vif *aml_vif);
 
 int aml_send_sched_scan_req(struct aml_vif *aml_vif,

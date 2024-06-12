@@ -35,6 +35,7 @@ static char *mactrace_path = "/vendor/lib/firmware/la_dump/mactrace";
 static char *reg_path = "/data/dumpinfo";
 #define REG_DUMP_SIZE 2048
 
+unsigned int resume_flag = 0;
 bool pt_mode = 0;
 static unsigned char offset_times = 0;
 static uint32_t g_csi_set_num = 0;
@@ -98,6 +99,11 @@ typedef unsigned char   U8;
 #define EFUSE_BASE_02 0x02
 #define EFUSE_BASE_03 0x03
 #define EFUSE_BASE_09 0x09
+#define EFUSE_BASE_0A 0X0A
+#define EFUSE_BASE_0B 0X0B
+#define EFUSE_BASE_0C 0X0C
+#define EFUSE_BASE_0D 0X0D
+#define EFUSE_BASE_0E 0X0E
 #define EFUSE_BASE_0F 0x0F
 #define EFUSE_BASE_11 0x11
 #define EFUSE_BASE_12 0x12
@@ -421,27 +427,113 @@ int aml_set_reg(struct net_device *dev, int addr, int val)
     return 0;
 }
 
-int aml_sdio_start_test(struct net_device *dev)
+int aml_sdio_start_test(struct net_device *dev, int val)
 {
     struct aml_vif *aml_vif = netdev_priv(dev);
     struct aml_hw *aml_hw = aml_vif->aml_hw;
     unsigned int temperature = 0;
     unsigned int i = 0;
+    unsigned int j = 0;
+    unsigned test_time = val;
 
     unsigned char set_buf[100] = {0};
     unsigned char get_buf[100] = {0};
     unsigned char rst_buf[100] = {0};
-    memset(set_buf, 0x66, 100);
 
-    AML_PRINT(AML_DBG_MODULES_IWPRIV, "sdio stress testing start\n");
+    AML_PRINT(AML_DBG_MODULES_IWPRIV, "sdio/usb stress testing start\n");
+
+    if (test_time == 0) {
+       test_time = 100;
+    }
 
     while (1) {
         if (aml_bus_type == USB_MODE) {
-            aml_hw->plat->hif_ops->hi_write_sram((unsigned char *)set_buf, (unsigned char *)0x6000f4f4, 100, USB_EP4);
-            aml_hw->plat->hif_ops->hi_read_sram((unsigned char *)get_buf, (unsigned char *)0x6000f4f4, 100, USB_EP4); //RXU_STAT_DESC_POOL
+            memset(set_buf, 0x75, 100);
+            for (i = 0; i < 10; ++i) {
+                aml_hw->plat->hif_ops->hi_write_sram((unsigned char *)set_buf, (unsigned char *)0x6000f4f4, 100, USB_EP4);
+                aml_hw->plat->hif_ops->hi_read_sram_for_bt((unsigned char *)get_buf, (unsigned char *)0x6000f4f4, 100, USB_EP1);
+            }
+
+            if (!memcmp(set_buf, get_buf, 100)) {
+                AML_PRINT(AML_DBG_MODULES_IWPRIV, "EP1 test ok\n");
+            } else {
+                AML_PRINT(AML_DBG_MODULES_IWPRIV, "EP1 test fail\n");
+            }
+
+            memset(set_buf, 0x76, 100);
+            for (i = 0; i < 10; ++i) {
+                aml_hw->plat->hif_ops->hi_write_sram_for_bt((unsigned char *)set_buf, (unsigned char *)0x6000f4f4, 100, USB_EP2);
+                aml_hw->plat->hif_ops->hi_read_sram_for_bt((unsigned char *)get_buf, (unsigned char *)0x6000f4f4, 100, USB_EP2);
+            }
+
+            if (!memcmp(set_buf, get_buf, 100)) {
+                AML_PRINT(AML_DBG_MODULES_IWPRIV, "EP2 test ok\n");
+            } else {
+                AML_PRINT(AML_DBG_MODULES_IWPRIV, "EP2 test fail\n");
+            }
+
+            memset(set_buf, 0x70, 100);
+            for (i = 0; i < 10; ++i) {
+                aml_hw->plat->hif_ops->hi_write_sram_for_bt((unsigned char *)set_buf, (unsigned char *)0x6000f4f4, 100, USB_EP3);
+                aml_hw->plat->hif_ops->hi_read_sram_for_bt((unsigned char *)get_buf, (unsigned char *)0x6000f4f4, 100, USB_EP3);
+            }
+
+            if (!memcmp(set_buf, get_buf, 100)) {
+                AML_PRINT(AML_DBG_MODULES_IWPRIV, "EP3 test ok\n");
+            } else {
+                AML_PRINT(AML_DBG_MODULES_IWPRIV, "EP3 test fail\n");
+            }
+
+            memset(set_buf, 0x77, 100);
+            for (i = 0; i < 10; ++i) {
+                aml_hw->plat->hif_ops->hi_write_sram((unsigned char *)set_buf, (unsigned char *)0x6000f4f4, 100, USB_EP4);
+                aml_hw->plat->hif_ops->hi_read_sram((unsigned char *)get_buf, (unsigned char *)0x6000f4f4, 100, USB_EP4);
+            }
+
+            if (!memcmp(set_buf, get_buf, 100)) {
+                AML_PRINT(AML_DBG_MODULES_IWPRIV, "EP4 test ok\n");
+            } else {
+                AML_PRINT(AML_DBG_MODULES_IWPRIV, "EP4 test fail\n");
+            }
+
+            memset(set_buf, 0x88, 100);
+            for (i = 0; i < 10; ++i) {
+                aml_hw->plat->hif_ops->hi_write_sram((unsigned char *)set_buf, (unsigned char *)0x6000f4f4, 100, USB_EP5);
+                aml_hw->plat->hif_ops->hi_read_sram((unsigned char *)get_buf, (unsigned char *)0x6000f4f4, 100, USB_EP5);
+            }
+
+            if (!memcmp(set_buf, get_buf, 100)) {
+                AML_PRINT(AML_DBG_MODULES_IWPRIV, "EP5 test ok\n");
+            } else {
+                AML_PRINT(AML_DBG_MODULES_IWPRIV, "EP5 test fail\n");
+            }
+
+            memset(set_buf, 0x99, 100);
+            for (i = 0; i < 10; ++i) {
+                aml_hw->plat->hif_ops->hi_write_sram((unsigned char *)set_buf, (unsigned char *)0x6000f4f4, 100, USB_EP6);
+                aml_hw->plat->hif_ops->hi_read_sram((unsigned char *)get_buf, (unsigned char *)0x6000f4f4, 100, USB_EP6);
+            }
+
+            if (!memcmp(set_buf, get_buf, 100)) {
+                AML_PRINT(AML_DBG_MODULES_IWPRIV, "EP6 test ok\n");
+            } else {
+                AML_PRINT(AML_DBG_MODULES_IWPRIV, "EP6 test fail\n");
+            }
+
+            memset(set_buf, 0x89, 100);
+            for (i = 0; i < 10; ++i) {
+                aml_hw->plat->hif_ops->hi_write_sram((unsigned char *)set_buf, (unsigned char *)0x6000f4f4, 100, USB_EP7);
+                aml_hw->plat->hif_ops->hi_read_sram((unsigned char *)get_buf, (unsigned char *)0x6000f4f4, 100, USB_EP7);
+            }
+
+            if (!memcmp(set_buf, get_buf, 100)) {
+                AML_PRINT(AML_DBG_MODULES_IWPRIV, "EP7 test ok\n");
+            } else {
+                AML_PRINT(AML_DBG_MODULES_IWPRIV, "EP7 test fail\n");
+            }
         } else if (aml_bus_type == SDIO_MODE) {
-            aml_hw->plat->hif_sdio_ops->hi_random_ram_write((unsigned char *)set_buf, (unsigned char *)0x6000f4f4, 100); //RXU_STAT_DESC_POOL
-            aml_hw->plat->hif_sdio_ops->hi_random_ram_read((unsigned char *)get_buf, (unsigned char *)0x6000f4f4, 100); //RXU_STAT_DESC_POOL
+            aml_hw->plat->hif_sdio_ops->hi_random_ram_write((unsigned char *)set_buf, (unsigned char *)0x6000f4f4, 100);
+            aml_hw->plat->hif_sdio_ops->hi_random_ram_read((unsigned char *)get_buf, (unsigned char *)0x6000f4f4, 100);
         }
 
         if (memcmp(set_buf, get_buf, 100)) {
@@ -458,24 +550,16 @@ int aml_sdio_start_test(struct net_device *dev)
                 temperature = aml_hw->plat->hif_sdio_ops->hi_random_word_read(0x00a04940);
             }
 
-            i++;
-            if (i == 1000) {
-                AML_PRINT(AML_DBG_MODULES_IWPRIV, " test OK, temperature is 0x%08x\n", temperature & 0x0000ffff);
-                i = 0;
+            AML_PRINT(AML_DBG_MODULES_IWPRIV, " test OK, temperature is 0x%08x\n", temperature & 0x0000ffff);
+            if (j++ == test_time) {
+                break;
             }
-        }
-        memset(get_buf, 0x77, 100);
-        if (aml_bus_type == USB_MODE) {
-            aml_hw->plat->hif_ops->hi_write_sram((unsigned char *)rst_buf, (unsigned char *)0x6000f4f4, 100, USB_EP4); //RXU_STAT_DESC_POOL
-        } else if (aml_bus_type == SDIO_MODE) {
-            aml_hw->plat->hif_sdio_ops->hi_random_ram_write((unsigned char *)rst_buf, (unsigned char *)0x6000f4f4, 100); //RXU_STAT_DESC_POOL
         }
     }
 
-    AML_PRINT(AML_DBG_MODULES_IWPRIV, "sdio stress testing end\n");
+    AML_PRINT(AML_DBG_MODULES_IWPRIV, "sdio/usb stress testing end, times:%d\n", test_time);
     return 0;
 }
-
 
 int aml_enable_wf(struct net_device *dev, int wfflag)
 {
@@ -712,6 +796,9 @@ int aml_set_csi(struct net_device *dev, char* arg_iw)
                 req.mac_ta[i] = simple_strtoul(mac_addr[i], NULL, 16);
             }
         }
+        for (i = 0; i < MAC_ADDR_LEN; i++) {
+            kfree(mac_addr[i]);
+        }
         kfree(mac_addr);
     }
     arg_index++;
@@ -730,6 +817,9 @@ int aml_set_csi(struct net_device *dev, char* arg_iw)
                 req.mac_ra[i] = simple_strtoul(mac_addr[i], NULL, 16);
             }
         }
+        for (i = 0; i < MAC_ADDR_LEN; i++) {
+            kfree(mac_addr[i]);
+        }
         kfree(mac_addr);
     }
 
@@ -740,6 +830,10 @@ int aml_set_csi(struct net_device *dev, char* arg_iw)
 
     g_csi_set_num++;
     aml_csi_set(dev, &req);
+
+    for (i = 0; i < count + 1; i++) {
+        kfree(arg[i]);
+    }
     kfree(arg);
     return 0;
 }
@@ -1808,14 +1902,26 @@ static int aml_get_buf_state(struct net_device *dev)
 {
     struct aml_vif *aml_vif = netdev_priv(dev);
     struct aml_hw *aml_hw = aml_vif->aml_hw;
-    if (aml_hw->rx_buf_state & FW_BUFFER_EXPAND) {
-        AML_PRINT(AML_DBG_MODULES_IWPRIV, "rxbuf: 256k, txbuf: 128k\n");
-    } else if (aml_hw->rx_buf_state & FW_BUFFER_NARROW) {
-        AML_PRINT(AML_DBG_MODULES_IWPRIV, "rxbuf: 128k, txbuf: 256k\n");
+
+    if (aml_bus_type == PCIE_MODE) {
+        printk("invalid cmd\n");
+        return -1;
+    }
+    printk("=============================\n");
+    if (aml_hw->la_enable) {
+        printk("la status:       ON\n");
     } else {
-        AML_PRINT(AML_DBG_MODULES_IWPRIV, "err: rx_buf_state[%x]\n", aml_hw->rx_buf_state);
+        printk("la status:       OFF\n");
     }
 
+    if (aml_hw->rx_buf_state & FW_BUFFER_EXPAND) {
+        printk("trx status:      rxbuf large, txbuf small\n");
+    } else if (aml_hw->rx_buf_state & FW_BUFFER_NARROW) {
+        printk("trx status:      rxbuf small, txbuf large\n");
+    } else {
+        printk("err: rx_buf_state[%x]\n", aml_hw->rx_buf_state);
+    }
+    printk("=============================\n");
     return 0;
 }
 
@@ -1844,12 +1950,14 @@ static int aml_get_tcp_ack_info(struct net_device *dev)
     struct aml_vif *aml_vif = netdev_priv(dev);
     struct aml_hw *aml_hw = aml_vif->aml_hw;
     struct aml_tcp_sess_mgr *ack_mgr = &aml_hw->ack_mgr;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 12, 0)
     AML_PRINT(AML_DBG_MODULES_IWPRIV, "ack_mgr->max_drop_cnt=%u\n", atomic_read(&ack_mgr->max_drop_cnt));
     AML_PRINT(AML_DBG_MODULES_IWPRIV, "ack_mgr->enable=%u\n", atomic_read(&ack_mgr->enable));
     AML_PRINT(AML_DBG_MODULES_IWPRIV, "ack_mgr->max_timeout=%u\n", atomic_read(&ack_mgr->max_timeout));
     AML_PRINT(AML_DBG_MODULES_IWPRIV, "ack_mgr->dynamic_adjust=%u\n", atomic_read(&ack_mgr->dynamic_adjust));
     AML_PRINT(AML_DBG_MODULES_IWPRIV, "ack_mgr->session_num=%u\n", ack_mgr->used_num);
-    AML_PRINT(AML_DBG_MODULES_IWPRIV, "ack_mgr->ack_winsize=%u\n", atomic_read(&ack_mgr->ack_winsize));
+    AML_PRINT(AML_DBG_MODULES_IWPRIV, "ack_mgr->ack_winsize=%u\n", ack_mgr->ack_winsize);
+#endif
     return 0;
 }
 
@@ -2020,14 +2128,14 @@ static int aml_send_twt_teardown(struct net_device *dev, int id)
     return _aml_send_twt_teardown(aml_hw, &twt_teardown, &twt_teardown_cfm);
 }
 
-int aml_set_macbypass(struct net_device *dev, int format_type, int bandwidth, int rate, int siso_or_mimo)
+int aml_set_macbypass(struct net_device *dev, unsigned int dpd_cfg)
 {
     struct aml_vif *aml_vif = netdev_priv(dev);
 
-    AML_PRINT(AML_DBG_MODULES_IWPRIV, "set macbypass, format_type:%d, bandwidth:%d, rate:%d, siso_or_mimo:%d!\n",
-           format_type, bandwidth, rate, siso_or_mimo);
+    AML_PRINT(AML_DBG_MODULES_IWPRIV, "set dpd_cfg: 0x%x!\n",
+           dpd_cfg);
 
-    _aml_set_macbypass(aml_vif, format_type, bandwidth, rate, siso_or_mimo);
+    _aml_set_macbypass(aml_vif, dpd_cfg);
 
     return 0;
 }
@@ -2725,7 +2833,7 @@ int aml_11b_siso_wf0_tx(struct net_device *dev, U8 rate, U8 tx_pwr, U8 length, U
     aml_set_reg(dev, 0x60c0b390, 0x00010101);
     aml_set_reg(dev, 0x00a0b1b8, 0xc0003000);
     aml_set_reg(dev, 0x60c00800, 0x00000110);
-    aml_set_reg(dev, 0x60c0b100, 0x00303030);
+    aml_set_reg(dev, 0x60c0b100, 0x00333333);
     aml_set_reg(dev, 0x60c06000, 0x00000000);
     aml_set_reg(dev, 0x60c06004, 0x00020000);
     aml_set_reg(dev, 0x60c06008, 0x00000012);
@@ -2787,7 +2895,7 @@ int aml_11b_siso_wf1_tx(struct net_device *dev, U8 rate, U8 tx_pwr, U8 length, U
     aml_set_reg(dev, 0x60c0b390, 0x00010102);
     aml_set_reg(dev, 0x00a0b1b8, 0xc0003100);
     aml_set_reg(dev, 0x60c00800, 0x00000110);
-    aml_set_reg(dev, 0x60c0b100, 0x00303030);
+    aml_set_reg(dev, 0x60c0b100, 0x00333333);
     aml_set_reg(dev, 0x60c06000, 0x00000000);
     aml_set_reg(dev, 0x60c06004, 0x00020000);
     aml_set_reg(dev, 0x60c06008, 0x00000012);
@@ -2858,7 +2966,7 @@ int aml_11ag_siso_wf0_tx(struct net_device *dev, U8 rate, U8 tx_pwr, U8 length, 
     aml_set_reg(dev, 0x00a0b1b8, 0xc0003000);
     aml_set_reg(dev, 0x60c00800, 0x00000110);
     aml_set_reg(dev, 0x60c0088c, 0x00005050);
-    aml_set_reg(dev, 0x60c0b100, 0x00303030);
+    aml_set_reg(dev, 0x60c0b100, 0x00333333);
     aml_set_reg(dev, 0x60c06000, 0x00000000);
     aml_set_reg(dev, 0x60c06004, 0x00020000);
     aml_set_reg(dev, 0x60c06008, 0x00000012);
@@ -2929,7 +3037,7 @@ int aml_11ag_siso_wf1_tx(struct net_device *dev, U8 rate, U8 tx_pwr, U8 length, 
     aml_set_reg(dev, 0x00a0b1b8, 0xc0003100);
     aml_set_reg(dev, 0x60c00800, 0x00000110);
     aml_set_reg(dev, 0x60c0088c, 0x00005050);
-    aml_set_reg(dev, 0x60c0b100, 0x00303030);
+    aml_set_reg(dev, 0x60c0b100, 0x00333333);
     aml_set_reg(dev, 0x60c06000, 0x00000000);
     aml_set_reg(dev, 0x60c06004, 0x00020000);
     aml_set_reg(dev, 0x60c06008, 0x00000012);
@@ -2980,7 +3088,7 @@ int aml_ht_siso_wf0_tx(struct net_device *dev, U8 bw, U8 rate, U8 tx_pwr, U8 len
         aml_set_reg(dev, 0x60c00800, 0x00000111);
     }
     aml_set_reg(dev, 0x60c0088c, 0x00005050);
-    aml_set_reg(dev, 0x60c0b100, 0x00303030);
+    aml_set_reg(dev, 0x60c0b100, 0x00333333);
     aml_set_reg(dev, 0x60c06000, 0x00000000);
     aml_set_reg(dev, 0x60c06004, 0x00020000);
     aml_set_reg(dev, 0x60c06008, 0x00000012);
@@ -3096,7 +3204,7 @@ int aml_ht_siso_wf1_tx(struct net_device *dev, U8 bw, U8 rate, U8 tx_pwr, U8 len
         aml_set_reg(dev, 0x60c00800, 0x00000111);
     }
     aml_set_reg(dev, 0x60c0088c, 0x00005050);
-    aml_set_reg(dev, 0x60c0b100, 0x00303030);
+    aml_set_reg(dev, 0x60c0b100, 0x00333333);
     aml_set_reg(dev, 0x60c06000, 0x00000000);
     aml_set_reg(dev, 0x60c06004, 0x00020000);
     aml_set_reg(dev, 0x60c06008, 0x00000012);
@@ -3158,7 +3266,7 @@ int aml_vht_siso_wf0_tx(struct net_device *dev, U8 bw, U8 rate, U8 tx_pwr, U8 le
     } else if (bw == 0x2) {
         aml_set_reg(dev, 0x60c00800, 0x00000112);
     }
-    aml_set_reg(dev, 0x60c0b100, 0x00303030);
+    aml_set_reg(dev, 0x60c0b100, 0x00333333);
     aml_set_reg(dev, 0x60c06000, 0x00000000);
     aml_set_reg(dev, 0x60c06004, 0x00020000);
     aml_set_reg(dev, 0x60c06008, 0x00000012);
@@ -3279,7 +3387,7 @@ int aml_vht_siso_wf1_tx(struct net_device *dev, U8 bw, U8 rate, U8 tx_pwr, U8 le
     } else if (bw == 0x2) {
         aml_set_reg(dev, 0x60c00800, 0x00000112);
     }
-    aml_set_reg(dev, 0x60c0b100, 0x00303030);
+    aml_set_reg(dev, 0x60c0b100, 0x00333333);
     aml_set_reg(dev, 0x60c06000, 0x00000000);
     aml_set_reg(dev, 0x60c06004, 0x00020000);
     aml_set_reg(dev, 0x60c06008, 0x00000012);
@@ -3340,7 +3448,7 @@ int aml_hesu_siso_wf0_tx(struct net_device *dev, U8 bw, U8 rate, U8 tx_pwr, U8 l
         aml_set_reg(dev, 0x60c00800, 0x00000112);
     }
     aml_set_reg(dev, 0x60c0088c, 0x00005050);
-    aml_set_reg(dev, 0x60c0b100, 0x00303030);
+    aml_set_reg(dev, 0x60c0b100, 0x00333333);
 
     aml_set_reg(dev, 0x60c06000, 0x00000000);
     if (bw == 0x0 || bw == 0x1) {
@@ -3494,7 +3602,7 @@ int aml_hesu_siso_wf1_tx(struct net_device *dev, U8 bw, U8 rate, U8 tx_pwr, U8 l
         aml_set_reg(dev, 0x60c00800, 0x00000112);
     }
     aml_set_reg(dev, 0x60c0088c, 0x00005050);
-    aml_set_reg(dev, 0x60c0b100, 0x00303030);
+    aml_set_reg(dev, 0x60c0b100, 0x00333333);
     aml_set_reg(dev, 0x60c06000, 0x00000000);
     if (bw == 0x0 || bw == 0x1) {
         aml_set_reg(dev, 0x60c06004, 0x00020000);
@@ -3589,13 +3697,13 @@ int aml_set_tx_prot(struct net_device *dev, int tx_pam, int tx_pam1)
     {
         if (model == 3)
         {
-            aml_set_reg(dev,0x60c0b100, 0x00505050);
-            aml_set_reg(dev,0x60c0b104, 0x00505050);
+            aml_set_reg(dev,0x60c0b100, 0x00484848);
+            aml_set_reg(dev,0x60c0b104, 0x00484848);
         }
         else
         {
-            aml_set_reg(dev,0x60c0b100, 0x00383838);
-            aml_set_reg(dev,0x60c0b104, 0x00383838);
+            aml_set_reg(dev,0x60c0b100, 0x00333333);
+            aml_set_reg(dev,0x60c0b104, 0x00333333);
         }
     }
     else
@@ -3821,19 +3929,33 @@ int aml_emb_la_capture(struct net_device *dev, int bus1, int bus2)
 
 }
 
-int aml_emb_la_enable(struct net_device *dev)
+int aml_emb_la_enable(struct net_device *dev, int enable)
 {
     struct aml_vif *aml_vif = netdev_priv(dev);
     struct aml_hw *aml_hw = aml_vif->aml_hw;
-    int enable  = 1;
 
-    if (aml_hw->la_enable) {
-        AML_INFO("la had enable!");
-        return 0;
+    if (aml_bus_type == PCIE_MODE) {
+        printk("invalid cmd\n");
+        return -1;
+    }
+
+    if (enable != 0 && enable != 1) {
+        AML_INFO("param error:%d\n",  enable);
+        return -1;
+    }
+
+    if (enable == aml_hw->la_enable) {
+        AML_INFO("The set la status is consistent with the current la status, Do nothing!");
+        return -1;
+    }
+
+    if (aml_hw->rx_buf_state & BUFFER_STATUS) {
+        AML_INFO("During dynamic buf switch, please try again later");
+        return -1;
     }
 
     _aml_set_la_enable(aml_hw, enable);
-    aml_hw->la_enable = 1;
+    aml_hw->la_enable = enable;
 
     return 0;
 }
@@ -4298,6 +4420,7 @@ int aml_set_fwlog_cmd(struct net_device *dev, int mode)
     struct aml_hw *aml_hw = aml_vif->aml_hw;
     int ret = 0;
 
+    resume_flag = mode;
     if (aml_bus_type != PCIE_MODE && trace_log_file_info.log_buf && trace_log_file_info.ptr && trace_log_file_info.buf) {
         if (mode == 0) {
             aml_hw->trace_bit_flag &= ~TRACE_ENABLE_BIT_FLAG;
@@ -4313,6 +4436,15 @@ int aml_set_fwlog_cmd(struct net_device *dev, int mode)
     } else {
         AML_PRINT(AML_DBG_MODULES_IWPRIV, "bus_type err or trace_log_file_info init failed!\n");
     }
+    return 0;
+}
+
+static int aml_iwpriv_set_mcc_ratio(struct net_device *dev, int ratio)
+{
+    struct aml_vif *aml_vif = netdev_priv(dev);
+
+    aml_set_mcc_ratio(aml_vif, ratio);
+
     return 0;
 }
 
@@ -4585,7 +4717,15 @@ int aml_get_bt_mac_addr(struct net_device *dev,union iwreq_data *wrqu, char *ext
     return 0;
 }
 
-#ifdef SDIO_SPEED_DEBUG
+int aml_iwpriv_set_rts_based_txop(struct net_device *dev, int enable)
+{
+    struct aml_vif *aml_vif = netdev_priv(dev);
+
+    aml_set_wfa_rts_based_txop(aml_vif, enable);
+
+    return 0;
+}
+
 #define TEST_SDIO_ONLY
 //#define SDIO_NORMAL_TX
 #define SDIO_TX
@@ -4594,7 +4734,7 @@ int aml_get_bt_mac_addr(struct net_device *dev,union iwreq_data *wrqu, char *ext
 static unsigned long payload_total = 0;
 static unsigned char start_flag = 0;
 static unsigned long in_time;
-int g_test_times = 3;
+int g_test_times = 5;
 
 void aml_datarate_monitor(void)
 {
@@ -4606,10 +4746,11 @@ void aml_datarate_monitor(void)
         start_flag = 0;
         payload_total = 0;
         g_test_times--;
-        AML_PRINT(AML_DBG_MODULES_IWPRIV, ">>>sdio_speed :%d mbps, time:%d\n", sdio_speed, (jiffies - in_time));
+        AML_PRINT(AML_DBG_MODULES_IWPRIV, ">>>interface_speed :%d mbps, time:%d\n", sdio_speed, (jiffies - in_time));
     }
 }
 
+#ifdef SDIO_SPEED_DEBUG
 int aml_sdio_max_speed_test_cmd(struct net_device *dev, int enable)
 {
     struct aml_vif *aml_vif = netdev_priv(dev);
@@ -4713,6 +4854,106 @@ int aml_sdio_max_speed_test_cmd(struct net_device *dev, int enable)
 }
 #endif
 
+int aml_usb_max_speed_test_cmd(struct net_device *dev, int enable, int data_len)
+{
+    struct aml_vif *aml_vif = netdev_priv(dev);
+    struct aml_hw *aml_hw = aml_vif->aml_hw;
+    unsigned char *usb_test_buf = (unsigned char *)kmalloc(800 * 1024, GFP_ATOMIC);
+
+    if (usb_test_buf == NULL) {
+        AML_PRINT(AML_DBG_MODULES_IWPRIV, "usb_test_buf is null\n");
+        return 1;
+    }
+
+    if (data_len > 800 * 1024) {
+        AML_PRINT(AML_DBG_MODULES_IWPRIV, "test data len too long data_len:%d\n", data_len);
+        return 1;
+    }
+
+    AML_PRINT(AML_DBG_MODULES_IWPRIV, "usb speed testing\n");
+
+    g_test_times = 8;
+    while (enable && g_test_times) {
+        if (!start_flag) {
+            start_flag = 1;
+            in_time = jiffies;
+        }
+
+        if (enable > 10) {
+            aml_hw->plat->hif_ops->hi_write_sram((unsigned char *)usb_test_buf, (unsigned char *)0x6000f4f4, data_len, USB_EP4);
+        } else {
+            aml_hw->plat->hif_ops->hi_read_sram((unsigned char *)usb_test_buf, (unsigned char *)0x6000f4f4, data_len, USB_EP4);
+        }
+
+        payload_total += data_len;
+        aml_datarate_monitor();
+    }
+
+    if (enable > 10) {
+        AML_PRINT(AML_DBG_MODULES_IWPRIV, "usb tx speed testing end, times:%d, data_len:%d\n", g_test_times, data_len);
+    } else {
+        AML_PRINT(AML_DBG_MODULES_IWPRIV, "usb rx speed testing end, times:%d, data_len:%d\n", g_test_times, data_len);
+    }
+
+    return 0;
+}
+
+int aml_get_bt_digital_gain_efuse_times(struct net_device *dev)
+{
+    unsigned int reg_val = 0;
+    unsigned int times = 0;
+    struct aml_vif *aml_vif = netdev_priv(dev);
+
+    reg_val = _aml_get_efuse(aml_vif, EFUSE_BASE_0D);
+
+    //xosc first times vld disable
+    if ((reg_val & BIT31) == 0) {
+        times = 1;
+
+    } else {
+        times = 0;
+    }
+
+    AML_PRINT(AML_DBG_MODULES_IWPRIV, "bt_digital_gain efuse times: 0x%08x\n", times);
+
+    return times;
+}
+
+int aml_set_bt_digital_gain_efuse(struct net_device *dev, unsigned char bdr_gain, unsigned char edr_gain)
+{
+    unsigned int efuse_data = 0;
+    struct aml_vif *aml_vif = netdev_priv(dev);
+
+    efuse_data = _aml_get_efuse(aml_vif, EFUSE_BASE_0F);
+    if ((efuse_data & 0xffff0000) != 0) {
+        AML_PRINT(AML_DBG_MODULES_IWPRIV, "aml_set_bt_digital_gain_efuse exist:%04x\n", (efuse_data & 0xffff0000));
+        return -1;
+    }
+
+    efuse_data = (((edr_gain << 8) | bdr_gain) << 16);
+    _aml_set_efuse(aml_vif, EFUSE_BASE_0F, efuse_data);
+    _aml_set_efuse(aml_vif, EFUSE_BASE_0D, BIT(31));
+    AML_PRINT(AML_DBG_MODULES_IWPRIV, "aml_set_bt_digital_gain_efuse:0x%8x\n", efuse_data);
+
+    return 0;
+}
+
+int aml_get_bt_digital_gain_efuse(struct net_device *dev, unsigned char *extra)
+{
+    unsigned int efuse_data = 0;
+    struct aml_vif *aml_vif = netdev_priv(dev);
+
+    efuse_data = _aml_get_efuse(aml_vif, EFUSE_BASE_0F);
+
+    extra[0] = (efuse_data & 0x00ff0000) >> 16;
+    extra[1] = (efuse_data & 0xff000000) >> 24;
+
+    AML_PRINT(AML_DBG_MODULES_IWPRIV, "aml_get_bt_pwr_vid efuse_data:%08x, return result: %02x:%02x\n", efuse_data, extra[0], extra[1]);
+
+    return 0;
+}
+
+
 #if defined(CONFIG_WEXT_PRIV)
 static int aml_iwpriv_send_para1(struct net_device *dev,
     struct iw_request_info *info, union iwreq_data *wrqu, char *extra)
@@ -4792,6 +5033,11 @@ static int aml_iwpriv_send_para1(struct net_device *dev,
         case AML_IWP_SET_XOSC_CTUNE:
             aml_set_xosc_ctune(dev, wrqu, extra, set1);
             break;
+        if (aml_bus_type != PCIE_MODE) {
+            case AML_IWP_BUS_START_TEST:
+                aml_sdio_start_test(dev, set1);
+                break;
+        }
         case AML_IWP_SET_POWER_OFFSET:
             aml_set_power_offset(dev, wrqu, extra, set1);
             break;
@@ -4859,6 +5105,18 @@ static int aml_iwpriv_send_para1(struct net_device *dev,
         case AML_IWP_GET_FW_LOG:
             aml_set_fwlog_cmd(dev, set1);
             break;
+        case AML_IWP_LA_ENABLE:
+            aml_emb_la_enable(dev, set1);
+            break;
+        case AML_IWP_SET_MCC_RATIO:
+            aml_iwpriv_set_mcc_ratio(dev, set1);
+            break;
+        case AML_IWP_SET_MACBYPASS:
+            aml_set_macbypass(dev, set1);
+            break;
+        case AML_IWP_SET_RTS_BASED_TXOP:
+            aml_iwpriv_set_rts_based_txop(dev, set1);
+            break;
         default:
             AML_PRINT(AML_DBG_MODULES_IWPRIV, "%s %d: param err\n", __func__, __LINE__);
             break;
@@ -4913,6 +5171,12 @@ static int aml_iwpriv_send_para2(struct net_device *dev,
             break;
         case AML_IWP_SET_TCP_DELAY_ACK:
             aml_set_tcp_delay_ack(dev, set1,set2);
+            break;
+        case AML_IWP_ENABLE_USB_CAL_SPEED:
+            aml_usb_max_speed_test_cmd(dev, set1, set2);
+            break;
+        case AML_IWP_SET_BT_DIGITAL_GAIN:
+            aml_set_bt_digital_gain_efuse(dev, set1, set2);
             break;
         default:
             break;
@@ -4969,9 +5233,6 @@ static int aml_iwpriv_send_para4(struct net_device *dev,
     AML_PRINT(AML_DBG_MODULES_IWPRIV, "%s cmd:%d set1:%d set2:%d set3:%d set4:%d\n", __func__, sub_cmd, set1, set2, set3, set4);
 
     switch (sub_cmd) {
-        case AML_IWP_SET_MACBYPASS:
-            aml_set_macbypass(dev, set1, set2, set3, set4);
-            break;
         default:
             break;
     }
@@ -5044,11 +5305,6 @@ static int aml_iwpriv_get(struct net_device *dev,
         case AML_IWP_GET_CLK:
            aml_get_clock(dev);
            break;
-        if (aml_bus_type != PCIE_MODE) {
-            case AML_IWP_BUS_START_TEST:
-                aml_sdio_start_test(dev);
-                break;
-        }
         case AML_IWP_GET_MSGIND:
             aml_get_proc_msg(dev);
             break;
@@ -5067,9 +5323,6 @@ static int aml_iwpriv_get(struct net_device *dev,
         case AML_IWP_GET_TCP_DELAY_ACK_INFO:
             aml_get_tcp_ack_info(dev);
             break;
-        case AML_IWP_LA_ENABLE:
-            aml_emb_la_enable(dev);
-            break;
         case AML_IWP_STOP_DC_TONE:
             aml_stop_dc_tone(dev);
             break;
@@ -5085,6 +5338,12 @@ static int aml_iwpriv_get(struct net_device *dev,
 #endif
         case AML_COEX_GET_STATUS:
             aml_coex_get_status(dev);
+            break;
+        case AML_IWP_GET_BT_DIGITAL_GAIN_EFUSE_TIMES:
+            aml_get_bt_digital_gain_efuse_times(dev);
+            break;
+        case AML_IWP_GET_BT_DIGITAL_GAIN:
+            aml_get_bt_digital_gain_efuse(dev, extra);
             break;
         default:
             AML_PRINT(AML_DBG_MODULES_IWPRIV, "%s %d param err\n", __func__, __LINE__);
@@ -5291,12 +5550,6 @@ static const struct iw_priv_args aml_iwpriv_private_args[] = {
         AML_IWP_CCA_CHECK,
         0, IW_PRIV_TYPE_INT | IW_PRIV_SIZE_FIXED | 1, "cca_check"},
     {
-        AML_IWP_BUS_START_TEST,
-        0, IW_PRIV_TYPE_INT | IW_PRIV_SIZE_FIXED | 1, "usb_start_test"},
-    {
-        AML_IWP_BUS_START_TEST,
-        0, IW_PRIV_TYPE_INT | IW_PRIV_SIZE_FIXED | 1, "sdio_start_test"},
-    {
         AML_IWP_GET_MSGIND,
         0, IW_PRIV_TYPE_INT | IW_PRIV_SIZE_FIXED | 1, "get_msgind"},
     {
@@ -5314,9 +5567,6 @@ static const struct iw_priv_args aml_iwpriv_private_args[] = {
     {
         AML_IWP_GET_TCP_DELAY_ACK_INFO,
         0, IW_PRIV_TYPE_INT | IW_PRIV_SIZE_FIXED | 1, "get_tcp_info"},
-    {
-        AML_IWP_LA_ENABLE,
-        0, IW_PRIV_TYPE_INT | IW_PRIV_SIZE_FIXED | 1, "la_enable"},
     {
         AML_IWP_STOP_DC_TONE,
         0, IW_PRIV_TYPE_INT | IW_PRIV_SIZE_FIXED | 1, "stop_dc_tone"},
@@ -5392,6 +5642,12 @@ static const struct iw_priv_args aml_iwpriv_private_args[] = {
         AML_IWP_SET_XOSC_CTUNE,
         IW_PRIV_TYPE_INT | IW_PRIV_SIZE_FIXED | 1, 0, "set_xosc_ctune"},
     {
+        AML_IWP_BUS_START_TEST,
+        IW_PRIV_TYPE_INT | IW_PRIV_SIZE_FIXED | 1, 0, "usb_start_test"},
+    {
+        AML_IWP_BUS_START_TEST,
+        IW_PRIV_TYPE_INT | IW_PRIV_SIZE_FIXED | 1, 0, "sdio_start_test"},
+    {
         AML_IWP_SET_POWER_OFFSET,
         IW_PRIV_TYPE_INT | IW_PRIV_SIZE_FIXED | 1, 0, "set_pwr_ofset"},
     {
@@ -5448,6 +5704,12 @@ static const struct iw_priv_args aml_iwpriv_private_args[] = {
         AML_IWP_GET_FW_LOG,
         IW_PRIV_TYPE_INT | IW_PRIV_SIZE_FIXED | 1, 0, "get_fw_log"},
     {
+        AML_IWP_LA_ENABLE,
+        IW_PRIV_TYPE_INT | IW_PRIV_SIZE_FIXED | 1, 0, "la_enable"},
+    {
+        AML_IWP_SET_MACBYPASS,
+        IW_PRIV_TYPE_INT | IW_PRIV_SIZE_FIXED | 1, 0, "set_dpd_gain"},
+    {
         SIOCIWFIRSTPRIV + 2,
         IW_PRIV_TYPE_INT | IW_PRIV_SIZE_FIXED | 2, 0, ""},
     {
@@ -5486,6 +5748,9 @@ static const struct iw_priv_args aml_iwpriv_private_args[] = {
     {
         AML_IWP_SET_TCP_DELAY_ACK,
         IW_PRIV_TYPE_INT | IW_PRIV_SIZE_FIXED | 2, 0, "set_delay_ack"},
+    {
+        AML_IWP_ENABLE_USB_CAL_SPEED,
+        IW_PRIV_TYPE_INT | IW_PRIV_SIZE_FIXED | 2, 0, "usb_speed"},
     {
         SIOCIWFIRSTPRIV + 3,
         IW_PRIV_TYPE_INT | IW_PRIV_SIZE_FIXED | 3, 0, ""},
@@ -5582,9 +5847,6 @@ static const struct iw_priv_args aml_iwpriv_private_args[] = {
         SIOCIWFIRSTPRIV + 7,
         IW_PRIV_TYPE_CHAR | IW_PRIV_SIZE_FIXED | 4, 0, ""},
     {
-        AML_IWP_SET_MACBYPASS,
-        IW_PRIV_TYPE_INT | IW_PRIV_SIZE_FIXED | 4, 0, "set_macbypass"},
-    {
         AML_IWP_GET_CHAN_LIST,
         0, IW_PRIV_TYPE_INT | IW_PRIV_SIZE_FIXED | 1, "get_chan_list"},
     {
@@ -5617,6 +5879,12 @@ static const struct iw_priv_args aml_iwpriv_private_args[] = {
             AML_IWP_GET_EFUSE_VENDOR_SN,
             IW_PRIV_TYPE_CHAR | IW_PRIV_SIZE_MASK, IW_PRIV_TYPE_CHAR | IW_PRIV_SIZE_MASK,
             "get_vendor_sn"},
+        {
+            AML_IWP_SET_MCC_RATIO,
+            IW_PRIV_TYPE_INT | IW_PRIV_SIZE_FIXED | 1, 0, "set_mcc_ratio"},
+        {
+            AML_IWP_SET_RTS_BASED_TXOP,
+            IW_PRIV_TYPE_INT | IW_PRIV_SIZE_FIXED | 1, 0, "set_wfa_rts_on"},
 };
 #endif
 

@@ -79,6 +79,8 @@ extern unsigned long long g_dbg_modules;
                 printk("[UTILS] <%s> %d "format"",__FUNCTION__, __LINE__, ##__VA_ARGS__); \
                 if(_m == AML_DBG_MODULES_CSI) \
                 printk("[CSI] "format"", ##__VA_ARGS__); \
+                if(_m == AML_DBG_MODULES_IRQ) \
+                printk("[IRQ] <%s> %d "format"",__FUNCTION__, __LINE__, ##__VA_ARGS__); \
             } \
         } while (0)
 

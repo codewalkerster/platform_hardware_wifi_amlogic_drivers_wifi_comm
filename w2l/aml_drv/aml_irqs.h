@@ -21,6 +21,6 @@ void aml_irq_sdio_hdlr_for_pt(struct sdio_func *func);
 irqreturn_t aml_irq_pcie_hdlr(int irq, void *dev_id);
 void aml_pcie_task(unsigned long data);
 void aml_enable_sdio_irq(struct aml_hw *aml_hw);
-void aml_disable_sdio_irq(struct aml_hw *aml_hw);
+u32 aml_disable_sdio_irq(struct aml_hw *aml_hw);
 
 #endif /* _AML_IRQS_H_ */

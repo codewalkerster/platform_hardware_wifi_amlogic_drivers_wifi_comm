@@ -795,5 +795,17 @@ typedef union RG_AON_A80_FIELD
   } b;
 } RG_AON_A80_FIELD_T;
 
+#define RG_AON_A81                                (CHIP_INTF_REG_BASE + 0x144)
+// Bit 3   :0      rg_usb_rst_crtl                U     RW        default = 'h0
+typedef union RG_AON_A81_FIELD
+{
+  unsigned int data;
+  struct
+  {
+    unsigned int rg_usb_rst_crtl : 4;
+    unsigned int rsvd_0 : 28;
+  } b;
+} RG_AON_A81_FIELD_T;
+
 #endif
 

@@ -305,6 +305,7 @@ int aml_dbgfs_txq(char *buf, size_t size, struct aml_txq *txq, int type, int tid
                     (txq->status & AML_TXQ_STOP_CSA) ? "S" : " ",
                     (txq->status & AML_TXQ_STOP_MU_POS) ? "M" : " ",
                     (txq->status & AML_TXQ_NDEV_FLOW_CTRL) ? "N" : " ",
+                    (txq->status & AML_TXQ_STOP_COEX_INACTIVE) ? "I" : " ",
                     txq->credits, skb_queue_len(&txq->sk_list),
                     txq->nb_retry, pushed);
     idx += res;

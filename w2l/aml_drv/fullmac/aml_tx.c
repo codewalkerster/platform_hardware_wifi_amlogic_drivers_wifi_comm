@@ -807,9 +807,6 @@ static void aml_amsdu_del_subframe_header(struct aml_amsdu_txhdr *amsdu_txhdr)
     pos += sizeof(struct aml_amsdu_txhdr);
     eth = (struct ethhdr*)pos;
     pos += amsdu_txhdr->pad + sizeof(struct ethhdr);
-    if (aml_bus_type == SDIO_MODE) {
-        pos += 4;
-    }
 
     if (ntohs(eth->h_proto) >= ETH_P_802_3_MIN) {
         pos += sizeof(rfc1042_header) + 2;
@@ -864,7 +861,6 @@ static int aml_amsdu_add_subframe_header(struct aml_hw *aml_hw,
     struct ethhdr *amsdu_hdr, *eth = (struct ethhdr *)skb->data;
     int headroom_need, msdu_len, amsdu_len;
     u8 *pos, *amsdu_start;
-    u32 mpdu_buf_flag;
 
     msdu_len = skb->len - sizeof(*eth);
     headroom_need = sizeof(*amsdu_txhdr) + amsdu->pad +
@@ -874,9 +870,7 @@ static int aml_amsdu_add_subframe_header(struct aml_hw *aml_hw,
         msdu_len += sizeof(rfc1042_header) + 2;
     }
     amsdu_len = msdu_len + sizeof(*amsdu_hdr) + amsdu->pad;
-    if (aml_bus_type == SDIO_MODE) {
-        headroom_need += 4;
-    }
+
     /* we should have enough headroom (checked in xmit) */
     if (WARN_ON(skb_headroom(skb) < headroom_need)) {
         return -1;
@@ -892,12 +886,6 @@ static int aml_amsdu_add_subframe_header(struct aml_hw *aml_hw,
     eth = (struct ethhdr *)pos;
     pos += sizeof(*eth);
 
-    if (aml_bus_type == SDIO_MODE) {
-        mpdu_buf_flag = HW_FIRST_MPDUBUF_FLAG|HW_LAST_MPDUBUF_FLAG|HW_LAST_AGG_FLAG;
-        mpdu_buf_flag |= HW_MPDU_LEN_SET(amsdu_len);
-        memcpy(pos, &mpdu_buf_flag, 4);
-        pos += 4;
-    }
     /* Add padding from previous subframe */
     amsdu_start = pos;
     memset(pos, 0, amsdu->pad);
@@ -1102,6 +1090,8 @@ static void aml_amsdu_dismantle(struct aml_hw *aml_hw, struct aml_sw_txhdr *sw_t
         struct aml_sw_txhdr *sw_txhdr;
         size_t frame_len;
         size_t data_oft;
+        u8 hw_calc = 0;
+        u8 is_frag = 0;
 
         list_del(&amsdu_txhdr->list);
         if (aml_bus_type == USB_MODE) {
@@ -1147,6 +1137,8 @@ static void aml_amsdu_dismantle(struct aml_hw *aml_hw, struct aml_sw_txhdr *sw_t
            sw_txhdr->ipc_data = amsdu_txhdr->ipc_data; // It's OK to re-use amsdu_txhdr ptr
            sw_txhdr->desc.api.host.packet_addr[0] = sw_txhdr->ipc_data.dma_addr + data_oft;
         }
+        if (aml_bus_type == SDIO_MODE)
+            sdio_checksum_process(aml_hw, skb, &hw_calc, &is_frag);
         sw_txhdr->desc.api.host.packet_len[0] = frame_len;
         sw_txhdr->desc.api.host.packet_cnt = 1;
         if (aml_bus_type == USB_MODE) {
@@ -1158,10 +1150,16 @@ static void aml_amsdu_dismantle(struct aml_hw *aml_hw, struct aml_sw_txhdr *sw_t
             sdio_txhdr = (struct aml_sdio_txhdr *)skb_push(skb, AML_SDIO_TX_HEADROOM);
             sdio_txhdr->sw_hdr = sw_txhdr;
             sdio_txhdr->mpdu_buf_flag = 0;
-            sdio_txhdr->mpdu_buf_flag = HW_FIRST_MPDUBUF_FLAG|HW_LAST_MPDUBUF_FLAG|HW_LAST_AGG_FLAG;
-            sdio_txhdr->mpdu_buf_flag |= HW_MPDU_LEN_SET(sw_txhdr->frame_len + sizeof(struct txdesc_host) + SDIO_FRAME_TAIL_LEN);
-
-            memset(&sdio_txhdr->desc, 0, sizeof(struct txdesc_host)/*8 byte alignment*/);
+            sdio_txhdr->mpdu_buf_flag = HW_FIRST_MPDUBUF_FLAG|HW_LAST_MPDUBUF_FLAG|HW_FIRST_AGG_FLAG|HW_LAST_AGG_FLAG;
+            sdio_txhdr->mpdu_buf_flag |= HW_MPDU_LEN_SET(sw_txhdr->frame_len + SDIO_FRAME_TAIL_LEN);
+            sdio_txhdr->cksum_flag = SDIO_TX_CKSUM_DATA_FLAG;
+            if (hw_calc) {
+                sdio_txhdr->cksum_flag |= SDIO_TX_CKSUM_ENABLE;
+            }
+            if (is_frag) {
+                sdio_txhdr->cksum_flag |= SDIO_TX_CKSUM_FRAG_FLAG;
+            }
+            memset(&sdio_txhdr->desc, 0, sizeof(struct txdesc_host) + AMSDU_LLC_LEN /*8 byte alignment*/);
         } else {
             txhdr = (struct aml_txhdr *)skb_push(skb, AML_TX_HEADROOM);
             txhdr->sw_hdr = sw_txhdr;
@@ -1245,7 +1243,7 @@ static void aml_amsdu_update_len(struct aml_hw *aml_hw, struct aml_txq *txq,
 }
 #endif /* CONFIG_AML_AMSDUS_TX */
 
-bool aml_filter_sp_data_frame(struct sk_buff *skb, struct aml_vif *aml_vif, AML_SP_STATUS_E sp_status)
+bool aml_filter_sp_data_frame(struct sk_buff *skb, struct aml_vif *aml_vif, AML_SP_STATUS_E sp_status, u8 *token)
 {
     struct ethhdr *ethhdr = (struct ethhdr *)skb->data;
     struct udphdr *udphdr;
@@ -1257,6 +1255,7 @@ bool aml_filter_sp_data_frame(struct sk_buff *skb, struct aml_vif *aml_vif, AML_
     u8 str[200];
     u32 offset = 0;
     u8 *p = str;
+    static u8 txcfm_token = 0;
 
     //filter eapol
     if (ethhdr->h_proto == htons(ETH_P_PAE)) {
@@ -1274,24 +1273,26 @@ bool aml_filter_sp_data_frame(struct sk_buff *skb, struct aml_vif *aml_vif, AML_
         u8 *target_mac = skb->data + ETH_HDR_LEN + 18;
         u8 *target_ip = skb->data + ETH_HDR_LEN + 24;
 
+        if (token) {
+            txcfm_token++;
+            if (txcfm_token == 0)
+                txcfm_token = 1;
+            *token = txcfm_token;
+        }
+
         offset += sprintf(p + offset, sp_frame_status_trace[sp_status]);
+
         if (op == 1) {
-            offset += sprintf(p + offset, "arp req,vif_idx:%d ", aml_vif->vif_index);
+            offset += sprintf(p + offset, "arp req,vif_idx:%d txcfm_no:%d ", aml_vif->vif_index, txcfm_token);
         }
         else if (op == 2) {
-            offset += sprintf(p + offset, "arp rsp,vif_idx:%d ", aml_vif->vif_index);
+            offset += sprintf(p + offset, "arp rsp,vif_idx:%d txcfm_no:%d ", aml_vif->vif_index, txcfm_token);
         }
         else {
-            offset += sprintf(p + offset, "arp unknown:%x,vif_idx:%d ", op, aml_vif->vif_index);
+            offset += sprintf(p + offset, "arp unknown:%x,vif_idx:%d txcfm_no:%d ", op, aml_vif->vif_index, txcfm_token);
         }
-        offset += sprintf(p + offset, "sender:[%02x:%02x:%02x:%02x:%02x:%02x ",
-                    sender_mac[0], sender_mac[1], sender_mac[2], sender_mac[3], sender_mac[4], sender_mac[5]);
-        offset += sprintf(p + offset, "%d.%d.%d.%d]",
-                    sender_ip[0], sender_ip[1], sender_ip[2], sender_ip[3]);
-        offset += sprintf(p + offset, "receiver:[%02x:%02x:%02x:%02x:%02x:%02x ",
-                    target_mac[0], target_mac[1], target_mac[2], target_mac[3], target_mac[4], target_mac[5]);
-        offset += sprintf(p + offset, "%d.%d.%d.%d]",
-                    target_ip[0], target_ip[1], target_ip[2], target_ip[3]);
+
+        offset += sprintf(p + offset, "sender:[%pM %pI4] receiver:[%pM %pI4]", sender_mac, sender_ip, target_mac, target_ip);
 
         if (((sp_status == SP_STATUS_RX) && (!memcmp(target_ip, &aml_vif->ipv4_addr, IPV4_ADDR_LEN)))
             || (sp_status != SP_STATUS_RX))
@@ -1529,6 +1530,31 @@ void aml_pkt_orphan_partial(struct sk_buff *skb, int tsq)
 #endif
 
 
+
+void sdio_checksum_process(struct aml_hw *aml_hw, struct sk_buff *skb, u8 *hw_calc, u8 *is_frag)
+{
+    struct iphdr *iphdrp = NULL;
+    struct ethhdr *eh;
+
+    if (skb->ip_summed == CHECKSUM_PARTIAL) {
+        if (aml_hw->mod_params->cksum_en) {
+            iphdrp = (struct iphdr *)((unsigned char *)skb->data + sizeof(struct ethhdr));
+            eh = (struct ethhdr *)skb->data;
+            if (eh->h_proto == htons(ETH_P_IP)) {
+                if (ip_is_fragment(iphdrp)) {
+                    *is_frag = 1;
+                }
+                else {
+                    *hw_calc = 1;
+                }
+            }
+            if (*hw_calc == 0) {
+              //call kernel calculate
+              skb_checksum_help(skb);
+            }
+        }
+    }
+}
 /**
  * netdev_tx_t (*ndo_start_xmit)(struct sk_buff *skb,
  *                               struct net_device *dev);
@@ -1559,6 +1585,9 @@ netdev_tx_t aml_start_xmit(struct sk_buff *skb, struct net_device *dev)
 #endif
     struct aml_usb_txhdr *usb_txhdr;
     bool sp_frame = false;
+    u8 hw_calc = 0;
+    u8 is_frag = 0;
+    u8 txcfm_token = 0;
 
     sk_pacing_shift_update(skb->sk, aml_hw->tcp_pacing_shift);
     if (aml_bus_type == PCIE_MODE) {
@@ -1592,6 +1621,8 @@ netdev_tx_t aml_start_xmit(struct sk_buff *skb, struct net_device *dev)
         dev_kfree_skb_any(skb);
         skb = newskb;
     }
+    if (aml_bus_type == SDIO_MODE)
+        sdio_checksum_process(aml_hw, skb, &hw_calc, &is_frag);
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 6, 0) && LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0)
     aml_pkt_orphan_partial(skb, aml_hw->tsq);
@@ -1608,7 +1639,7 @@ netdev_tx_t aml_start_xmit(struct sk_buff *skb, struct net_device *dev)
      * filer special frame,reuse TXU_CNTRL_MESH_FWD
      * TBD,use own flag in next rom version
      */
-    if (aml_filter_sp_data_frame(skb,aml_vif,SP_STATUS_TX_START)) {
+    if (aml_filter_sp_data_frame(skb, aml_vif, SP_STATUS_TX_START, &txcfm_token)) {
         sp_frame = true;
         txq = aml_txq_sta_get(sta, tid, aml_hw);
         tid = 0xff;
@@ -1639,6 +1670,7 @@ netdev_tx_t aml_start_xmit(struct sk_buff *skb, struct net_device *dev)
     sw_txhdr->amsdu.len = 0;
     sw_txhdr->amsdu.nb = 0;
 #endif
+    sw_txhdr->txcfm_token = txcfm_token;
 
     /* Prepare IPC buffer for DMA transfer */
     eth = (struct ethhdr *)skb->data;
@@ -1693,10 +1725,17 @@ netdev_tx_t aml_start_xmit(struct sk_buff *skb, struct net_device *dev)
             sdio_txhdr = (struct aml_sdio_txhdr *)skb_push(skb, AML_SDIO_TX_HEADROOM);
             sdio_txhdr->sw_hdr = sw_txhdr;
             sdio_txhdr->mpdu_buf_flag = 0;
-            sdio_txhdr->mpdu_buf_flag = HW_FIRST_MPDUBUF_FLAG|HW_LAST_MPDUBUF_FLAG|HW_LAST_AGG_FLAG;
-            sdio_txhdr->mpdu_buf_flag |= HW_MPDU_LEN_SET(sw_txhdr->frame_len + sizeof(struct txdesc_host) + SDIO_FRAME_TAIL_LEN);
+            sdio_txhdr->mpdu_buf_flag = HW_FIRST_MPDUBUF_FLAG|HW_LAST_MPDUBUF_FLAG|HW_FIRST_AGG_FLAG|HW_LAST_AGG_FLAG;
+            sdio_txhdr->mpdu_buf_flag |= HW_MPDU_LEN_SET(sw_txhdr->frame_len + SDIO_FRAME_TAIL_LEN);
 
-            memset(&sdio_txhdr->desc, 0, sizeof(struct txdesc_host)/*8 byte alignment*/);
+            sdio_txhdr->cksum_flag = SDIO_TX_CKSUM_DATA_FLAG;
+            if (hw_calc) {
+                sdio_txhdr->cksum_flag |= SDIO_TX_CKSUM_ENABLE;
+            }
+            if (is_frag) {
+                sdio_txhdr->cksum_flag |= SDIO_TX_CKSUM_FRAG_FLAG;
+            }
+            memset(&sdio_txhdr->desc, 0, sizeof(struct txdesc_host) + AMSDU_LLC_LEN/*8 byte alignment*/);
         }
 
     }
@@ -1709,7 +1748,7 @@ netdev_tx_t aml_start_xmit(struct sk_buff *skb, struct net_device *dev)
     spin_lock_bh(&aml_hw->tx_lock);
 
     if (txq->idx == TXQ_INACTIVE ) {
-        trace_printk("%s:%d Get txq idx is inactive after spin_lock_bh  \n",__func__, __LINE__);
+        printk("%s:%d Get txq idx is inactive after spin_lock_bh  \n",__func__, __LINE__);
        //"do not push and process it with kernel list lib it whill be re-pull out and used this freed buf"
        spin_unlock_bh(&aml_hw->tx_lock);
        goto free;
@@ -1784,7 +1823,7 @@ int aml_start_mgmt_xmit(struct aml_vif *vif, struct aml_sta *sta,
     } else if (aml_bus_type == USB_MODE){
         tx_headroom = AML_USB_TX_HEADROOM;
     } else {
-        tx_headroom = AML_SDIO_TX_HEADROOM;
+        tx_headroom = AML_SDIO_TX_HEADROOM - AMSDU_LLC_LEN;
     }
 
     /* Create a SK Buff object that will contain the provided data */
@@ -1886,9 +1925,9 @@ int aml_start_mgmt_xmit(struct aml_vif *vif, struct aml_sta *sta,
             sdio_txhdr = (struct aml_sdio_txhdr *)skb_push(skb, tx_headroom);
             sdio_txhdr->sw_hdr = sw_txhdr;
             sdio_txhdr->mpdu_buf_flag = 0;
-            sdio_txhdr->mpdu_buf_flag = HW_FIRST_MPDUBUF_FLAG|HW_LAST_MPDUBUF_FLAG;
-            sdio_txhdr->mpdu_buf_flag |= HW_MPDU_LEN_SET(sw_txhdr->frame_len + sizeof(struct txdesc_host) + SDIO_FRAME_TAIL_LEN);
-
+            sdio_txhdr->mpdu_buf_flag = HW_FIRST_MPDUBUF_FLAG|HW_LAST_MPDUBUF_FLAG|HW_FIRST_AGG_FLAG|HW_LAST_AGG_FLAG;
+            sdio_txhdr->mpdu_buf_flag |= HW_MPDU_LEN_SET(sw_txhdr->frame_len + SDIO_FRAME_TAIL_LEN);
+            sdio_txhdr->cksum_flag = 0;
             memset(&sdio_txhdr->desc, 0, sizeof(struct txdesc_host)/*8 byte alignment*/);
         }
     }
@@ -2093,6 +2132,7 @@ int aml_tx_cfm_task(void *data)
     unsigned char  page_num = 0;
     struct sched_param sch_param;
     uint32_t sp_ret = 0;
+    struct aml_sdio_txhdr *sdio_txhdr;
 
     sch_param.sched_priority = 91;
 #ifndef CONFIG_PT_MODE
@@ -2167,7 +2207,15 @@ int aml_tx_cfm_task(void *data)
                 for (i = 0; i < txdesc_host->api.host.packet_cnt; i++) {
                     frame_tot_len += txdesc_host->api.host.packet_len[i];
                 }
-                page_num = txdesc_host->api.host.packet_cnt;
+                sdio_txhdr = (struct aml_sdio_txhdr *)sw_txhdr->skb->data;
+                if (sdio_txhdr->cksum_flag & SDIO_TX_CKSUM_DATA_FLAG) {
+                    if (txdesc_host->api.host.packet_cnt > 1) {
+                        frame_tot_len += AMSDU_LLC_LEN;
+                    } else {
+                        frame_tot_len += LLC_LEN;
+                    }
+                }
+                page_num = howmanypage(frame_tot_len + SDIO_DATA_OFFSET + SDIO_FRAME_TAIL_LEN, SDIO_PAGE_LEN);
             } else {
                 #ifdef CONFIG_AML_USB_LARGE_PAGE
                 page_num = 1;
@@ -2210,7 +2258,7 @@ int aml_tx_cfm_task(void *data)
                 if (aml_bus_type == USB_MODE)
                     mgmt = (struct ieee80211_mgmt *)(skb->data + AML_USB_TX_HEADROOM);
                 else if (aml_bus_type == SDIO_MODE)
-                    mgmt = (struct ieee80211_mgmt *)(skb->data + AML_SDIO_TX_HEADROOM);
+                    mgmt = (struct ieee80211_mgmt *)(skb->data + AML_SDIO_TX_HEADROOM - AMSDU_LLC_LEN);
                 if ((ieee80211_is_deauth(mgmt->frame_control)) && (sw_txhdr->aml_vif->is_disconnect == 1)) {
                     sw_txhdr->aml_vif->is_disconnect = 0;
                 }
@@ -2260,6 +2308,10 @@ int aml_tx_cfm_task(void *data)
                 /* firmware postponed this buffer */
                 aml_tx_retry(aml_hw, skb, sw_txhdr, cfm.status);
                 continue;
+            }
+
+            if (sw_txhdr->txcfm_token) {
+                printk("[TX CFM] token:%d, status:%d", sw_txhdr->txcfm_token, cfm.status.acknowledged);
             }
 
             trace_skb_confirm(skb, txq, hwq, &cfm);
@@ -2314,12 +2366,16 @@ int aml_tx_cfm_task(void *data)
             }
             aml_tx_statistic(sw_txhdr->aml_vif, txq, cfm.status, sw_txhdr->frame_len);
 
-            kmem_cache_free(aml_hw->sw_txhdr_cache, sw_txhdr);
             if (aml_bus_type == SDIO_MODE) {
-                skb_pull(skb, AML_SDIO_TX_HEADROOM);
+                if (sw_txhdr->desc.api.host.flags & TXU_CNTRL_MGMT) {
+                    skb_pull(skb, AML_SDIO_TX_HEADROOM - AMSDU_LLC_LEN);
+                } else {
+                    skb_pull(skb, AML_SDIO_TX_HEADROOM);
+                }
             } else {
                 skb_pull(skb, AML_USB_TX_HEADROOM);
             }
+            kmem_cache_free(aml_hw->sw_txhdr_cache, sw_txhdr);
 
 #ifdef CONFIG_SDIO_TX_ENH
 #ifdef SDIO_TX_ENH_DBG
@@ -2434,6 +2490,10 @@ int aml_txdatacfm(void *pthis, void *arg)
         /* firmware postponed this buffer */
         aml_tx_retry(aml_hw, skb, sw_txhdr, cfm->status);
         return 0;
+    }
+
+    if (sw_txhdr->txcfm_token) {
+        printk("[TX CFM] token:%d, status:%d", sw_txhdr->txcfm_token, cfm->status.acknowledged);
     }
 
     trace_skb_confirm(skb, txq, hwq, cfm);

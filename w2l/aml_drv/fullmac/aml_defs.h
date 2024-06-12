@@ -854,18 +854,19 @@ struct aml_hw {
     struct list_head rxbuf_used_list;
 
     struct aml_defer_rx defer_rx;
-    uint32_t rx_buf_state;
-    uint32_t rx_buf_end;
-    uint32_t rx_buf_len;
-    uint32_t fw_new_pos;
-    uint32_t fw_buf_pos;
-    uint32_t last_fw_pos;
-    uint32_t dynabuf_stop_tx;
-    uint32_t send_tx_stop_to_fw;
-    uint8_t *host_buf;
-    uint8_t *host_buf_start;
-    uint8_t *host_buf_end;
-    uint8_t *rx_host_switch_addr;
+    uint32_t rx_buf_state;        /* dynamic switch host rxbuf state */
+    uint32_t rx_buf_end;          /* fw sharemem rxbuf end addr recorded on the host */
+    uint32_t rx_buf_len;          /* fw sharemem rxbuf len recorded on the host */
+    uint32_t fw_new_pos;          /* host reads the end address of sharemem rxbuf data on the fw, which is a sharemem rxdesc address */
+    uint32_t fw_buf_pos;          /* host reads the start address of sharemem rxbuf data on the fw, which is a sharemem rxdesc address */
+    uint32_t last_fw_pos;         /* The address of the last packet processed by aml_rx_task on the host side,
+                                     which is a sharemem rxdesc address,
+                                     is used with next_fw_pkt to calculate the offset of the next packet */
+    uint32_t dynabuf_stop_tx;     /* dynamic buf switch, tx stop flag */
+    uint32_t send_tx_stop_to_fw;  /* dynamic buf switch, send tx stop to fw flag */
+    uint8_t *host_buf;            /* host buf for test */
+    uint8_t *host_buf_start;      /* start address of each packet processed by aml_rx_task, which is a host rxbuf local address */
+    uint8_t *host_buf_end;        /* end address of host rxbuf data processed by aml_rx_task, which is a host rxbuf local address */
     spinlock_t reoder_lock;
     spinlock_t buf_start_lock;
     struct assoc_info rx_assoc_info;
@@ -1025,10 +1026,11 @@ struct aml_hw {
     /*if the skb cnt of pending queue >= napi_pend_pkt_num,append to napi_rx_upload_queue*/
     u8 napi_pend_pkt_num;
 #endif
-    uint32_t recv_pkt_len;
+    uint32_t recv_pkt_len;    /* length of the fw rx data received by the host */
     struct freq_qos_request *qos_req;
     u8 traffic_busy;
     int min_cpu_freq;
+    bool wfd_present;
 };
 
 u8 *aml_build_bcn(struct aml_bcn *bcn, struct cfg80211_beacon_data *new);

@@ -30,7 +30,7 @@ void aml_enable_sdio_irq(struct aml_hw *aml_hw)
     return;
 }
 
-void aml_disable_sdio_irq(struct aml_hw *aml_hw)
+u32 aml_disable_sdio_irq(struct aml_hw *aml_hw)
 {
     unsigned int reg_data[2] = {0};
 
@@ -38,7 +38,8 @@ void aml_disable_sdio_irq(struct aml_hw *aml_hw)
     aml_hw->plat->hif_sdio_ops->hi_desc_read((unsigned char *)(unsigned long)reg_data,
             (unsigned char *)(unsigned long)RG_WIFI_IF_FW2HST_IRQ_CFG , sizeof(reg_data));
 
-    return;
+    AML_PRINT(AML_DBG_MODULES_IRQ, "irq status 0x%08x\n", reg_data[1]);
+    return reg_data[1];
 }
 
 void aml_irq_usb_hdlr(struct urb *urb)
@@ -198,8 +199,15 @@ irqreturn_t aml_irq_pcie_hdlr(int irq, void *dev_id)
         return IRQ_HANDLED;
     }
     disable_irq_nosync(irq);
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0) // template solution for S905L3A
+
 #ifdef CONFIG_AML_USE_TASK
     up(&aml_hw->irqhdlr->task_sem);
+#else
+    tasklet_schedule(&aml_hw->task);
+#endif
+
 #else
     tasklet_schedule(&aml_hw->task);
 #endif
@@ -225,7 +233,11 @@ void aml_pcie_task(unsigned long data)
     while ((status = ipc_host_get_status(aml_hw->ipc_env))) {
         /* All kinds of IRQs will be handled in one shot (RX, MSG, DBG, ...)
          * this will ack IPC irqs not the cfpga irqs */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0) // template solution for S905L3A
         ipc_host_irq(aml_hw->ipc_env, status);
+#else
+        ipc_host_irq_ext(aml_hw->ipc_env, status);
+#endif
 
         aml_plat->ack_irq(aml_hw);
     }

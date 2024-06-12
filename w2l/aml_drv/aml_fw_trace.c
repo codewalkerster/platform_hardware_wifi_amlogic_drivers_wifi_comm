@@ -52,21 +52,9 @@ static int saved_filters_cnt = 0;
 #define AML_FW_TRACE_CHECK_INT_MS 1000
 
 struct log_file_info trace_log_file_info;
+struct aml_trace_nl_info g_trace_nl_info;
 
 extern struct auc_hif_ops g_auc_hif_ops;
-
-struct aml_trace_nl_info {
-    struct sock * fw_log_sock;
-    int user_pid;
-    int enable;
-};
-
-struct log_nl_msg_info {
-    int msg_type;
-    int msg_len;
-};
-
-struct aml_trace_nl_info g_trace_nl_info;
 
 int aml_send_log_to_user(char *pbuf, uint16_t len, int msg_type);
 
@@ -1091,35 +1079,38 @@ int aml_trace_log_to_file(uint16_t *trace, uint16_t *trace_limit)
     int flag = 0, buf_flag = 0;
     int tran_len = 0, save_len = 0;
 
-    if (!trace_log_file_info.log_buf)
+    if (!trace_log_file_info.log_buf) {
+        AML_INFO("trace_log_file_info.log_buf not ready \n");
         goto err;
-
+    }
     memset(trace_log_file_info.log_buf, 0, 64 * 1024);
 
     while (1) {
+        if (trace >= trace_limit || *trace == AML_FW_TRACE_LAST_ENTRY) {
+            break;
+        }
         str_size = sizeof(str);
         memset(str, 0, str_size);
         trace = aml_fw_trace_to_str(trace, str, &str_size);
         memcpy(trace_log_file_info.log_buf + offset, str, str_size);
         offset += str_size;
-
-        if (trace >= trace_limit || *trace == AML_FW_TRACE_LAST_ENTRY) {
-            break;
-        }
     }
 
+    //AML_INFO("offset :%d \n", offset);
+
     if (g_trace_nl_info.enable) {
+        //AML_INFO("aml_trace_log_to_file len:%d\n", trace_log_file_info.len);
         while (trace_log_file_info.len > 0) {
-            //AML_INFO("aml_trace_log_to_file len:%d\n", trace_log_file_info.len);
             if (trace_log_file_info.len > 16 * 1024) {
                 tran_len = 16 * 1024;
-                ret = aml_send_log_to_user(trace_log_file_info.log_buf + save_len, tran_len, AML_TRACE_FW_LOG_UPLOAD);
+                ret = aml_send_log_to_user(trace_log_file_info.buf + save_len, tran_len, AML_TRACE_FW_LOG_UPLOAD);
             } else {
-                ret = aml_send_log_to_user(trace_log_file_info.log_buf + save_len, trace_log_file_info.len, AML_TRACE_FW_LOG_UPLOAD);
+                ret = aml_send_log_to_user(trace_log_file_info.buf + save_len, trace_log_file_info.len, AML_TRACE_FW_LOG_UPLOAD);
                 buf_flag = 1;
             }
+            //AML_INFO("len > 0 ret :%d tran_len:%d \n", ret, tran_len);
             if (ret > 0) {
-                if (buf_flag == 1) {
+                if (buf_flag) {
                     trace_log_file_info.len = 0;
                     memset(trace_log_file_info.buf, 0, 96 * 1024);
                     break;
@@ -1128,27 +1119,34 @@ int aml_trace_log_to_file(uint16_t *trace, uint16_t *trace_limit)
                     trace_log_file_info.len -= tran_len;
                 }
             } else {
-                memcpy(trace_log_file_info.buf + trace_log_file_info.len, trace_log_file_info.log_buf + sock_wr_len, offset);
+                AML_INFO("len > 0 sending fail len:%d offset :%d \n", trace_log_file_info.len, offset);
+                memcpy(trace_log_file_info.buf + trace_log_file_info.len, trace_log_file_info.log_buf, offset);
+                trace_log_file_info.len += offset;
                 goto err;
             }
         }
 
         do {
+            //AML_INFO("normal offset :%d \n", offset);
             if (offset > 16 * 1024) {
                 ret = aml_send_log_to_user(trace_log_file_info.log_buf + sock_wr_len, 16 * 1024, AML_TRACE_FW_LOG_UPLOAD);
             } else {
                 ret = aml_send_log_to_user(trace_log_file_info.log_buf + sock_wr_len, offset, AML_TRACE_FW_LOG_UPLOAD);
                 flag = 1;
             }
+            //AML_INFO("normal ret :%d \n", ret);
             if (ret < 0) {
                 if (flag) {
                     memcpy(trace_log_file_info.buf + trace_log_file_info.len, trace_log_file_info.log_buf + sock_wr_len, offset);
                     trace_log_file_info.len += offset;
+                    sock_wr_len += offset;
+                     offset = 0;
                 } else {
                     memcpy(trace_log_file_info.buf + trace_log_file_info.len, trace_log_file_info.log_buf + sock_wr_len, 16 * 1024);
                     trace_log_file_info.len += 16 * 1024;
+                    sock_wr_len += 16*1024;
+                    offset -= 16*1024;
                 }
-                offset = 0;
             } else {
                 if (flag) {
                     offset = 0;

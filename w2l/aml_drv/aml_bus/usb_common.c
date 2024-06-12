@@ -11,7 +11,6 @@
 #include "wifi_debug.h"
 #include "chip_bt_pmu_reg.h"
 
-
 struct auc_hif_ops g_auc_hif_ops;
 struct usb_device *g_udev = NULL;
 struct aml_hwif_usb g_hwif_usb;
@@ -31,6 +30,14 @@ int bt_wt_ptr = 0;
 int bt_rd_ptr = 0;
 /*co-exist flag for bt/wifi mode*/
 int coex_flag = 0;
+//use for suspend(kill)/resume(submit) usb_urb
+struct urb *g_usb_urb = NULL;
+struct urb * auc_alloc_urb(int iso_packets, gfp_t mem_flags)
+{
+    g_usb_urb = usb_alloc_urb(0, GFP_ATOMIC);
+    return g_usb_urb;
+}
+
 static int auc_probe(struct usb_interface *interface, const struct usb_device_id *id)
 {
     g_udev = usb_get_dev(interface_to_usbdev(interface));
@@ -55,13 +62,23 @@ static void auc_disconnect(struct usb_interface *interface)
     usb_set_intfdata(interface, NULL);
     usb_put_dev(g_udev);
     g_usb_after_probe = 0;
+    atomic_set(&g_wifi_pm.bus_suspend_cnt, 0);
     PRINT("--------aml_usb:disconnect-------\n");
 }
 
 #ifdef CONFIG_PM
 static int auc_reset_resume(struct usb_interface *interface)
 {
+    int ret = 0;
     atomic_set(&g_wifi_pm.bus_suspend_cnt, 0);
+
+    USB_BEGIN_LOCK();
+    ret = usb_submit_urb(g_usb_urb, GFP_ATOMIC);
+    USB_END_LOCK();
+    if (ret < 0) {
+        ERROR_DEBUG_OUT("usb_submit_urb failed %d\n", ret);
+    }
+
     PRINT("--------aml_usb:reset done-------\n");
     return 0;
 }
@@ -101,6 +118,13 @@ static int auc_suspend(struct usb_interface *interface,pm_message_t state)
     }
 
     atomic_set(&g_wifi_pm.bus_suspend_cnt, 1);
+    USB_BEGIN_LOCK();
+    if (g_usb_urb->status != 0) {
+        PRINT("usb_kill_urb\n");
+        usb_kill_urb((g_usb_urb));
+    }
+    USB_END_LOCK();
+
     PRINT("---------aml_usb suspend-------\n");
     return 0;
 }
@@ -136,7 +160,10 @@ static const struct usb_device_id auc_devices[] =
     {USB_DEVICE(W2_VENDOR,W2_PRODUCT)},
     {USB_DEVICE(W2u_VENDOR_AMLOGIC_EFUSE,W2u_PRODUCT_A_AMLOGIC_EFUSE)},
     {USB_DEVICE(W2u_VENDOR_AMLOGIC_EFUSE,W2u_PRODUCT_B_AMLOGIC_EFUSE)},
-    {USB_DEVICE(W2u_VENDOR_AMLOGIC_EFUSE,W2lu_W265U1M_PRODUCT_A_AMLOGIC_EFUSE)},
+    {USB_DEVICE(W2u_VENDOR_AMLOGIC_EFUSE,W2lu_W265U2M_PRODUCT_A_AMLOGIC_EFUSE)},
+    {USB_DEVICE(W2u_VENDOR_AMLOGIC_EFUSE,W2lu_W265U2_PRODUCT_A_AMLOGIC_EFUSE)},
+    {USB_DEVICE(W2u_VENDOR_AMLOGIC_EFUSE,W2lu_W255U1_PRODUCT_A_AMLOGIC_EFUSE)},
+    {USB_DEVICE(W2u_VENDOR_AMLOGIC_EFUSE,W2lu_W265U2M_PRODUCT_B_AMLOGIC_EFUSE)},
     {USB_DEVICE(W2u_VENDOR_AMLOGIC_EFUSE,W2lu_W265U2_PRODUCT_B_AMLOGIC_EFUSE)},
     {USB_DEVICE(W2u_VENDOR_AMLOGIC_EFUSE,W2lu_W255U1_PRODUCT_B_AMLOGIC_EFUSE)},
     {}
@@ -254,6 +281,7 @@ Try_again:
 EXPORT_SYMBOL(aml_usb_reset);
 EXPORT_SYMBOL(aml_usb_insmod);
 EXPORT_SYMBOL(aml_usb_rmmod);
+EXPORT_SYMBOL(auc_alloc_urb);
 EXPORT_SYMBOL(g_cmd_buf);
 EXPORT_SYMBOL(g_auc_hif_ops);
 EXPORT_SYMBOL(g_udev);

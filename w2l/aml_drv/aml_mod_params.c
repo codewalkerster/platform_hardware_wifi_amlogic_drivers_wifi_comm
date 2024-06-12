@@ -83,6 +83,7 @@ struct aml_mod_params aml_mod_params = {
     COMMON_PARAM(tx_to_vi, 0, 0)
     COMMON_PARAM(tx_to_vo, 0, 0)
     COMMON_PARAM(amsdu_tx, 0, 0)
+    COMMON_PARAM(cksum_en, false, false)
 
     /* SOFTMAC only parameters */
     SOFTMAC_PARAM(mfp_on, false)
@@ -270,6 +271,9 @@ MODULE_PARM_DESC(tx_to_vi,
 module_param_named(tx_to_vo, aml_mod_params.tx_to_vo, int, S_IRUGO);
 MODULE_PARM_DESC(tx_to_vo,
      "TX timeout for VO, in ms (Default: 0, Max: 65535). If 0, default value is applied");
+
+module_param_named(cksum_en, aml_mod_params.cksum_en, bool, S_IRUGO);
+MODULE_PARM_DESC(cksum_en, "Enable Sdio Tx Checksum (Default: 1-Enabled)");
 
 /* Regulatory rules */
 static struct ieee80211_regdomain aml_regdom = {

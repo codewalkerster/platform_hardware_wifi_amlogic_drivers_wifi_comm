@@ -1366,6 +1366,123 @@ typedef union RG_XMIT_A111_FIELD
   } b;
 } RG_XMIT_A111_FIELD_T;
 
+#define RG_XMIT_A112                              (0x1d0)
+// Bit 11  :0      rg_hc_thr_mcs0                 U     RW        default = 'h0
+// Bit 23  :12     rg_hc_thr_mcs1                 U     RW        default = 'h0
+// Bit 24          rg_hc_bypass_11n               U     RW        default = 'h1
+// Bit 28          rg_hc_dly_bypass_11n           U     RW        default = 'h1
+typedef union RG_XMIT_A112_FIELD
+{
+  unsigned int data;
+  struct
+  {
+    unsigned int rg_hc_thr_mcs0 : 12;
+    unsigned int rg_hc_thr_mcs1 : 12;
+    unsigned int rg_hc_bypass_11n : 1;
+    unsigned int rsvd_0 : 3;
+    unsigned int rg_hc_dly_bypass_11n : 1;
+    unsigned int rsvd_1 : 3;
+  } b;
+} RG_XMIT_A112_FIELD_T;
+
+#define RG_XMIT_A113                              (0x1d4)
+// Bit 11  :0      rg_hc_thr_mcs2                 U     RW        default = 'h0
+// Bit 23  :12     rg_hc_thr_mcs3                 U     RW        default = 'h0
+// Bit 24          rg_hc_bypass_11b               U     RW        default = 'h1
+// Bit 28          rg_hc_dly_bypass_11b           U     RW        default = 'h1
+typedef union RG_XMIT_A113_FIELD
+{
+  unsigned int data;
+  struct
+  {
+    unsigned int rg_hc_thr_mcs2 : 12;
+    unsigned int rg_hc_thr_mcs3 : 12;
+    unsigned int rg_hc_bypass_11b : 1;
+    unsigned int rsvd_0 : 3;
+    unsigned int rg_hc_dly_bypass_11b : 1;
+    unsigned int rsvd_1 : 3;
+  } b;
+} RG_XMIT_A113_FIELD_T;
+
+#define RG_XMIT_A114                              (0x1d8)
+// Bit 11  :0      rg_hc_thr_mcs4                 U     RW        default = 'h0
+// Bit 23  :12     rg_hc_thr_mcs5                 U     RW        default = 'h0
+typedef union RG_XMIT_A114_FIELD
+{
+  unsigned int data;
+  struct
+  {
+    unsigned int rg_hc_thr_mcs4 : 12;
+    unsigned int rg_hc_thr_mcs5 : 12;
+    unsigned int rsvd_0 : 8;
+  } b;
+} RG_XMIT_A114_FIELD_T;
+
+#define RG_XMIT_A115                              (0x1dc)
+// Bit 11  :0      rg_hc_thr_mcs6                 U     RW        default = 'h0
+// Bit 23  :12     rg_hc_thr_mcs7                 U     RW        default = 'h0
+typedef union RG_XMIT_A115_FIELD
+{
+  unsigned int data;
+  struct
+  {
+    unsigned int rg_hc_thr_mcs6 : 12;
+    unsigned int rg_hc_thr_mcs7 : 12;
+    unsigned int rsvd_0 : 8;
+  } b;
+} RG_XMIT_A115_FIELD_T;
+
+#define RG_XMIT_A116                              (0x1e0)
+// Bit 11  :0      rg_hc_thr_mcs8                 U     RW        default = 'h0
+// Bit 23  :12     rg_hc_thr_mcs9                 U     RW        default = 'h0
+typedef union RG_XMIT_A116_FIELD
+{
+  unsigned int data;
+  struct
+  {
+    unsigned int rg_hc_thr_mcs8 : 12;
+    unsigned int rg_hc_thr_mcs9 : 12;
+    unsigned int rsvd_0 : 8;
+  } b;
+} RG_XMIT_A116_FIELD_T;
+
+#define RG_XMIT_A117                              (0x1e4)
+// Bit 11  :0      rg_hc_thr_mcs10                U     RW        default = 'h0
+// Bit 23  :12     rg_hc_thr_mcs11                U     RW        default = 'h0
+typedef union RG_XMIT_A117_FIELD
+{
+  unsigned int data;
+  struct
+  {
+    unsigned int rg_hc_thr_mcs10 : 12;
+    unsigned int rg_hc_thr_mcs11 : 12;
+    unsigned int rsvd_0 : 8;
+  } b;
+} RG_XMIT_A117_FIELD_T;
+
+#define RG_XMIT_A118                              (0x1e8)
+// Bit 11  :0      rg_hc_thr_mcs_man              U     RW        default = 'h0
+// Bit 12          rg_hc_thr_mcs_man_mode         U     RW        default = 'h0
+// Bit 16          rg_hc_bypass_man               U     RW        default = 'h1
+// Bit 17          rg_hc_bypass_man_mode          U     RW        default = 'h0
+// Bit 18          rg_hc_dly_bypass_man           U     RW        default = 'h1
+// Bit 19          rg_hc_dly_bypass_man_mode      U     RW        default = 'h0
+typedef union RG_XMIT_A118_FIELD
+{
+  unsigned int data;
+  struct
+  {
+    unsigned int rg_hc_thr_mcs_man : 12;
+    unsigned int rg_hc_thr_mcs_man_mode : 1;
+    unsigned int rsvd_0 : 3;
+    unsigned int rg_hc_bypass_man : 1;
+    unsigned int rg_hc_bypass_man_mode : 1;
+    unsigned int rg_hc_dly_bypass_man : 1;
+    unsigned int rg_hc_dly_bypass_man_mode : 1;
+    unsigned int rsvd_1 : 12;
+  } b;
+} RG_XMIT_A118_FIELD_T;
+
 #define RG_XMIT_A119                              (0x1ec)
 // Bit 0           rg_tx_80m_ddc_bypass           U     RW        default = 'h0
 // Bit 9   :8      rg_tx_ch_bw                    U     RW        default = 'h0

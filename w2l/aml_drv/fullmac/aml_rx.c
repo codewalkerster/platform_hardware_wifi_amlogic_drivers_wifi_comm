@@ -299,7 +299,7 @@ static int aml_rx_data_skb(struct aml_hw *aml_hw, struct aml_vif *aml_vif,
 
             __skb_queue_tail(&list, skb);
             aml_hw->stats->amsdus_rx[0]++;
-            aml_filter_sp_data_frame(skb,aml_vif,SP_STATUS_RX);
+            aml_filter_sp_data_frame(skb, aml_vif, SP_STATUS_RX, NULL);
 
             if (frm_len > skb_tailroom(skb)) {
                 wiphy_err(aml_hw->wiphy, "A-MSDU truncated, skip it\n");
@@ -326,7 +326,7 @@ static int aml_rx_data_skb(struct aml_hw *aml_hw, struct aml_vif *aml_vif,
                 if (count > 0)
                     aml_hw->stats->amsdus_rx[count - 1]++;
             } else {
-                aml_filter_sp_data_frame(skb,aml_vif, SP_STATUS_RX);
+                aml_filter_sp_data_frame(skb, aml_vif, SP_STATUS_RX, NULL);
                 skb_put(skb, le32_to_cpu(rxhdr->hwvect.len));
                 aml_hw->stats->amsdus_rx[0]++;
                 __skb_queue_head(&list, skb);
@@ -1688,8 +1688,8 @@ s8 rx_skb_handle(struct rx_desc_head *desc_stat, struct aml_hw *aml_hw, struct r
         */
 
         if ((aml_hw->host_buf_start < rxbuf_end) && (aml_hw->host_buf_start + RX_PAYLOAD_OFFSET + eth_hdr_offset + desc_stat->frame_len > rxbuf_end)) {//loop
-            if (aml_hw->host_buf_start + RX_DESC_SIZE < rxbuf_end) {
-                if (aml_hw->host_buf_start + RX_PAYLOAD_OFFSET < rxbuf_end) {
+            if (aml_hw->host_buf_start + RX_DESC_SIZE <= rxbuf_end) {
+                if (aml_hw->host_buf_start + RX_PAYLOAD_OFFSET <= rxbuf_end) {
 #ifndef CONFIG_AML_RX_MINISIZE
                     if (hw_rxhdr->flags_is_80211_mpdu) {
                         if (aml_hw->host_buf_start + RX_PAYLOAD_OFFSET + desc_stat->frame_len <= rxbuf_end) {
@@ -1700,7 +1700,7 @@ s8 rx_skb_handle(struct rx_desc_head *desc_stat, struct aml_hw *aml_hw, struct r
                     } else
 #endif
                     {
-                        if (aml_hw->host_buf_start + RX_PAYLOAD_OFFSET + UNWRAP_SIZE < rxbuf_end) {//5
+                        if (aml_hw->host_buf_start + RX_PAYLOAD_OFFSET + UNWRAP_SIZE <= rxbuf_end) {//5
                             upload_len = rxbuf_end - aml_hw->host_buf_start - RX_PAYLOAD_OFFSET - eth_hdr_offset;
                             memcpy((unsigned char *)skb->data, aml_hw->host_buf_start + RX_PAYLOAD_OFFSET + eth_hdr_offset, upload_len);
                             memcpy((unsigned char *)skb->data + upload_len, rxbuf_end + RX_PD_LEN, desc_stat->frame_len - upload_len);
@@ -1992,12 +1992,11 @@ void aml_trigger_rst_rxd(struct aml_hw *aml_hw, uint32_t addr_rst)
         AML_INFO("reduce last_addr = %x, addr_rst = %x, free_page=%d", last_addr, addr_rst, aml_hw->g_tx_param.tx_page_free_num);
     }
 
-    if (aml_hw->rx_buf_state & BUFFER_NOTIFY) {
+    if (aml_hw->rx_buf_state & BUFFER_REDUCE_FINSH) {
         /* Host rx reduce had finshed, notify the firmware */
         addr_rst |= HOST_RXBUF_REDUCE_FINSH;
-        upload_flag = 1;
-        AML_INFO("reduce finsh last_addr = %x, addr_rst = %x, free_page=%d", last_addr, addr_rst, aml_hw->g_tx_param.tx_page_free_num);
-        aml_hw->rx_buf_state &= ~BUFFER_NOTIFY;
+        AML_INFO("reduce finsh last_addr = %x, addr_rst = %x", last_addr, addr_rst);
+        aml_hw->rx_buf_state &= ~BUFFER_REDUCE_FINSH;
     }
 
     if ((aml_hw->rx_buf_state & BUFFER_STATUS) && (aml_hw->rx_buf_state & BUFFER_EXPAND)) {
@@ -2011,10 +2010,8 @@ void aml_trigger_rst_rxd(struct aml_hw *aml_hw, uint32_t addr_rst)
     if (aml_hw->rx_buf_state & BUFFER_EXPEND_FINSH) {
         /* Host rx expend had finshed, notify the firmware */
         addr_rst |= HOST_RXBUF_ENLARGE_FINSH;
-        upload_flag = 1;
-        AML_INFO("expend finsh last_addr = %x, addr_rst = %x, free_page=%d", last_addr, addr_rst, aml_hw->g_tx_param.tx_page_free_num);
+        AML_INFO("expend finsh last_addr = %x, addr_rst = %x", last_addr, addr_rst);
         aml_hw->rx_buf_state &= ~BUFFER_EXPEND_FINSH;
-        aml_hw->rx_buf_state &= ~BUFFER_TX_USED_FLAG;
     }
 
     cmd_buf[0] = 1;
@@ -2071,12 +2068,11 @@ void aml_trigger_rst_rxd(struct aml_hw *aml_hw, uint32_t addr_rst)
         AML_INFO("reduce last_addr = %x, addr_rst = %x", last_addr, addr_rst);
     }
 
-    if (aml_hw->rx_buf_state & BUFFER_NOTIFY) {
+    if (aml_hw->rx_buf_state & BUFFER_REDUCE_FINSH) {
         /* Host rx reduce had finshed, notify the firmware */
         addr_rst |= HOST_RXBUF_REDUCE_FINSH;
-        upload_flag = 1;
         AML_INFO("reduce finsh last_addr = %x, addr_rst = %x", last_addr, addr_rst);
-        aml_hw->rx_buf_state &= ~BUFFER_NOTIFY;
+        aml_hw->rx_buf_state &= ~BUFFER_REDUCE_FINSH;
     }
 
     if ((aml_hw->rx_buf_state & BUFFER_STATUS) && (aml_hw->rx_buf_state & BUFFER_EXPAND)) {
@@ -2090,10 +2086,8 @@ void aml_trigger_rst_rxd(struct aml_hw *aml_hw, uint32_t addr_rst)
     if (aml_hw->rx_buf_state & BUFFER_EXPEND_FINSH) {
         /* Host rx expend had finshed, notify the firmware */
         addr_rst |= HOST_RXBUF_ENLARGE_FINSH;
-        upload_flag = 1;
         AML_INFO("expend finsh last_addr = %x, addr_rst = %x", last_addr, addr_rst);
         aml_hw->rx_buf_state &= ~BUFFER_EXPEND_FINSH;
-        aml_hw->rx_buf_state &= ~BUFFER_TX_USED_FLAG;
     }
 
     cmd_buf[0] = 1;
@@ -2149,7 +2143,7 @@ void aml_sdio_dynamic_buffer_check(struct aml_hw *aml_hw, struct rxbuf_list *rxb
             }
             aml_hw->rx_buf_state &= ~(BUFFER_STATUS);
             aml_hw->rx_buf_state &= ~(BUFFER_UPDATE_FLAG);
-            aml_hw->rx_buf_state |= BUFFER_NOTIFY;
+            aml_hw->rx_buf_state |= BUFFER_REDUCE_FINSH;
             AML_PRINT(AML_DBG_MODULES_RX, "%s,%d:reduce_finsh rx_buf_state = %x\n", __func__, __LINE__, aml_hw->rx_buf_state);
         } else if (aml_hw->rx_buf_state & BUFFER_EXPAND) {
             AML_PRINT(AML_DBG_MODULES_RX, "%s,%d:expend fw_new_pos=%x, fw_buf_pos=%x\n", __func__, __LINE__,
@@ -2160,14 +2154,14 @@ void aml_sdio_dynamic_buffer_check(struct aml_hw *aml_hw, struct rxbuf_list *rxb
             }
 
             if (aml_bus_type == SDIO_MODE) {
-                aml_hw->rx_buf_end = RXBUF_END_ADDR_LARGE;
-                aml_hw->rx_buf_len = RX_BUFFER_LEN_LARGE;
+                aml_hw->rx_buf_end = (aml_hw->la_enable) ? RXBUF_END_ADDR_LA_LARGE : RXBUF_END_ADDR_LARGE;
+                aml_hw->rx_buf_len = (aml_hw->la_enable) ? RX_BUFFER_LEN_LA_LARGE : RX_BUFFER_LEN_LARGE;
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5, 4, 0) // template solution for S905L3A
                 aml_rps_switch_check(aml_hw, RPS_OFF);
 #endif
             } else{
-                aml_hw->rx_buf_end = USB_RXBUF_END_ADDR_LARGE;
-                aml_hw->rx_buf_len = USB_RX_BUFFER_LEN_LARGE;
+                aml_hw->rx_buf_end = (aml_hw->la_enable) ? USB_RXBUF_END_ADDR_LA_LARGE : USB_RXBUF_END_ADDR_LARGE;
+                aml_hw->rx_buf_len = (aml_hw->la_enable) ? USB_RX_BUFFER_LEN_LA_LARGE : USB_RX_BUFFER_LEN_LARGE;
             }
 
             aml_hw->rx_buf_state &= ~(BUFFER_STATUS);
@@ -2340,13 +2334,16 @@ s8 aml_sdio_rxdataind(void *pthis, void *arg)
         }
 
         if (temp_list) {
+            /* host rxbuf dynamic switch */
             aml_sdio_dynamic_buffer_check(aml_hw, temp_list);
             need_len = CIRCLE_Subtract(fw_new_pos, fw_buf_pos, temp_list->rx_buf_len);
 
             temp_list->rxbuf_data_start = fw_buf_pos;
+            temp_list->rxbuf_data_end = fw_new_pos;
             if (aml_bus_type == SDIO_MODE) {
                 if (fw_new_pos > fw_buf_pos) {
-                     if (need_len / 512)
+                    /* fw rx data not loopback */
+                    if (need_len / 512)
                         remain_len = need_len % 512;
 
                     aml_hw->plat->hif_sdio_ops->hi_rx_buffer_read((unsigned char *)temp_list->rxbuf,
@@ -2355,6 +2352,7 @@ s8 aml_sdio_rxdataind(void *pthis, void *arg)
                     temp_list->first_len = need_len - remain_len;
                     temp_list->second_len = 0;
                 } else {
+                    /* fw rx data loopback */
                     aml_hw->plat->hif_sdio_ops->hi_rx_buffer_read((unsigned char *)temp_list->rxbuf,
                         (unsigned char *)(unsigned long)fw_buf_pos, temp_list->rx_buf_end - fw_buf_pos, 0);
 
@@ -2370,6 +2368,7 @@ s8 aml_sdio_rxdataind(void *pthis, void *arg)
                 }
             } else { //USB
                 if (fw_new_pos > fw_buf_pos) {
+                    /* fw rx data not loopback */
                     aml_hw->plat->hif_ops->hi_rx_buffer_read((unsigned char *)temp_list->rxbuf,
                         (unsigned char *)(unsigned long)fw_buf_pos, need_len, USB_EP4);
 
@@ -2377,7 +2376,9 @@ s8 aml_sdio_rxdataind(void *pthis, void *arg)
                         temp_list->second_len = 0;
                         aml_hw->recv_pkt_len = need_len;
                 } else {
+                    /* fw rx data loopback */
                     if (temp_list->rx_buf_end - fw_buf_pos < RX_DESC_SIZE) {
+                        /* fw rxbuf is not enough to store an rxdesc */
                         if (fw_new_pos > RXBUF_START_ADDR) {
                             aml_hw->plat->hif_ops->hi_rx_buffer_read((unsigned char *)temp_list->rxbuf,
                                 (unsigned char *)(unsigned long)RXBUF_START_ADDR, fw_new_pos - RXBUF_START_ADDR, USB_EP4);
@@ -2387,6 +2388,7 @@ s8 aml_sdio_rxdataind(void *pthis, void *arg)
                         temp_list->second_len = fw_new_pos - RXBUF_START_ADDR;
                         aml_hw->recv_pkt_len = temp_list->second_len;
                     } else {
+                        /* fw rx data is read in two parts */
                         aml_hw->plat->hif_ops->hi_rx_buffer_read((unsigned char *)temp_list->rxbuf,
                             (unsigned char *)(unsigned long)fw_buf_pos, temp_list->rx_buf_end - fw_buf_pos, USB_EP4);
 
@@ -2443,18 +2445,23 @@ s8 aml_sdio_rxdataind(void *pthis, void *arg)
     if (aml_hw->fw_buf_pos != aml_hw->fw_new_pos) {
         temp_list = aml_get_rxbuf_list_from_free_list(aml_hw);
         if (temp_list) {
+            /* host rxbuf dynamic switch */
             aml_sdio_dynamic_buffer_check(aml_hw, temp_list);
             need_len = CIRCLE_Subtract(fw_new_pos, fw_buf_pos, temp_list->rx_buf_len);
             temp_list->rxbuf_data_start = fw_buf_pos;
+            temp_list->rxbuf_data_end = fw_new_pos;
             if (aml_bus_type == SDIO_MODE) {
                 if (fw_new_pos > fw_buf_pos) {
+                    /* fw rx data not loopback */
                     aml_hw->plat->hif_sdio_ops->hi_rx_buffer_read((unsigned char *)temp_list->rxbuf,
                         (unsigned char *)(unsigned long)fw_buf_pos, need_len, 0);
 
                     temp_list->first_len = need_len;
                     temp_list->second_len = 0;
                 } else {
+                    /* fw rx data loopback */
                     if (temp_list->rx_buf_end - fw_buf_pos < RX_DESC_SIZE) {
+                        /* fw rxbuf is not enough to store an rxdesc */
                         if (fw_new_pos > RXBUF_START_ADDR) {
                             aml_hw->plat->hif_sdio_ops->hi_rx_buffer_read((unsigned char *)temp_list->rxbuf,
                                 (unsigned char *)(unsigned long)RXBUF_START_ADDR, fw_new_pos - RXBUF_START_ADDR, 0);
@@ -2463,6 +2470,7 @@ s8 aml_sdio_rxdataind(void *pthis, void *arg)
                         temp_list->first_len = 0;
                         temp_list->second_len = fw_new_pos - RXBUF_START_ADDR;
                     } else {
+                        /* fw rx data is read in two parts */
                         aml_hw->plat->hif_sdio_ops->hi_rx_buffer_read((unsigned char *)temp_list->rxbuf,
                             (unsigned char *)(unsigned long)fw_buf_pos, temp_list->rx_buf_end - fw_buf_pos, 0);
 
@@ -2476,6 +2484,7 @@ s8 aml_sdio_rxdataind(void *pthis, void *arg)
                 }
             } else { //USB
                 if (fw_new_pos > fw_buf_pos) {
+                    /* fw rx data not loopback */
                     aml_hw->plat->hif_ops->hi_rx_buffer_read((unsigned char *)temp_list->rxbuf,
                         (unsigned char *)(unsigned long)fw_buf_pos, need_len, USB_EP4);
 
@@ -2483,7 +2492,9 @@ s8 aml_sdio_rxdataind(void *pthis, void *arg)
                         temp_list->second_len = 0;
                         aml_hw->recv_pkt_len = temp_list->first_len;
                 } else {
+                    /* fw rx data loopback */
                     if (temp_list->rx_buf_end - fw_buf_pos < RX_DESC_SIZE) {
+                        /* fw rxbuf is not enough to store an rxdesc */
                         if (fw_new_pos > RXBUF_START_ADDR) {
                             aml_hw->plat->hif_ops->hi_rx_buffer_read((unsigned char *)temp_list->rxbuf,
                                 (unsigned char *)(unsigned long)RXBUF_START_ADDR, fw_new_pos - RXBUF_START_ADDR, USB_EP4);
@@ -2493,6 +2504,7 @@ s8 aml_sdio_rxdataind(void *pthis, void *arg)
                         temp_list->second_len = fw_new_pos - RXBUF_START_ADDR;
                         aml_hw->recv_pkt_len = temp_list->second_len;
                     } else {
+                        /* fw rx data is read in two parts */
                         aml_hw->plat->hif_ops->hi_rx_buffer_read((unsigned char *)temp_list->rxbuf,
                             (unsigned char *)(unsigned long)fw_buf_pos, temp_list->rx_buf_end - fw_buf_pos, USB_EP4);
 
@@ -2683,6 +2695,7 @@ int aml_rx_task(void *data)
             while ((!aml_hw->aml_rx_task_quit) && (aml_hw->host_buf_start < aml_hw->host_buf_end)) {
 
                 if ((aml_hw->host_buf_end - aml_hw->host_buf_start) >=  RX_PAYLOAD_OFFSET) {
+                    /* next_fw_pkt is rxdesc new_read addr, which is a sharemem rxdesc addr */
                     next_fw_pkt = (uint32_t *)(aml_hw->host_buf_start + NEXT_PKT_OFFSET);
                 } else {
                     aml_save_incomplete_rx_payload(aml_hw, temp_list, rxbuf_offset);
@@ -2744,15 +2757,24 @@ int aml_rx_task(void *data)
                 aml_sdio_usb_host_reoder_handle(aml_hw, &desc_stat, reorder_hostid_start, reorder_len);
 
         next_handle:
+                if (temp_list->first_len == 0 && *next_fw_pkt >= temp_list->rxbuf_data_end) {
+                    /* when temp_list->first_len is 0, if next_fw_pkt is greater than or equal to host reads the end address of
+                       sharemem rx data, the current host rxbuf has been processed, need break. */
+                    break;
+                }
+
                 if ((temp_list->rx_buf_end - *next_fw_pkt) < RX_DESC_SIZE) {
+                    /* end of sharemem rxbuf is not enough to store an rxdesc, next_fw_pkt will back to RXBUF_START_ADDR */
                     *next_fw_pkt = RXBUF_START_ADDR;
                 }
 
                 if (*next_fw_pkt > aml_hw->last_fw_pos) {
+                    /* update host_buf_start when next_fw_pkt not loopback */
                     spin_lock(&aml_hw->buf_start_lock);
                     aml_hw->host_buf_start += (*next_fw_pkt - aml_hw->last_fw_pos);
                     spin_unlock(&aml_hw->buf_start_lock);
                 } else {
+                    /* update host_buf_start when next_fw_pkt loopback */
                     spin_lock(&aml_hw->buf_start_lock);
                     aml_hw->host_buf_start = temp_list->rxbuf + temp_list->first_len + (*next_fw_pkt - RXBUF_START_ADDR);
                     spin_unlock(&aml_hw->buf_start_lock);
@@ -2822,6 +2844,7 @@ int aml_rx_task(void *data)
 #endif
 
             while ((!aml_hw->aml_rx_task_quit) && (aml_hw->host_buf_start < aml_hw->host_buf_end)) {
+                /* next_fw_pkt is rxdesc new_read addr, which is a sharemem rxdesc addr */
                 next_fw_pkt = (uint32_t *)(aml_hw->host_buf_start + NEXT_PKT_OFFSET);
                 if (*next_fw_pkt > temp_list->rx_buf_end || *next_fw_pkt < RXBUF_START_ADDR) {
                     AML_PRINT(AML_DBG_MODULES_RX, "=======error:invalid address %08x, start:%08x, end:%08x, fw_pre_pos: %x, fw_new_pos: %x, last_fw_pos: %x\n",
@@ -2861,15 +2884,24 @@ int aml_rx_task(void *data)
                 aml_sdio_usb_host_reoder_handle(aml_hw, &desc_stat, reorder_hostid_start, reorder_len);
 
         next_handle:
+                if (temp_list->first_len == 0 && *next_fw_pkt >= temp_list->rxbuf_data_end) {
+                    /* when temp_list->first_len is 0, if next_fw_pkt is greater than or equal to host reads the end address of
+                       sharemem rx data, the current host rxbuf has been processed, need break. */
+                    break;
+                }
+
                 if ((temp_list->rx_buf_end - *next_fw_pkt) < RX_DESC_SIZE) {
+                    /* end of sharemem rxbuf is not enough to store an rxdesc, next_fw_pkt will back to RXBUF_START_ADDR */
                     *next_fw_pkt = RXBUF_START_ADDR;
                 }
 
                 if (*next_fw_pkt > aml_hw->last_fw_pos) {
+                    /* update host_buf_start when next_fw_pkt not loopback */
                     spin_lock(&aml_hw->buf_start_lock);
                     aml_hw->host_buf_start += (*next_fw_pkt - aml_hw->last_fw_pos);
                     spin_unlock(&aml_hw->buf_start_lock);
                 } else {
+                    /* update host_buf_start when next_fw_pkt loopback */
                     spin_lock(&aml_hw->buf_start_lock);
                     aml_hw->host_buf_start = temp_list->rxbuf + temp_list->first_len + (*next_fw_pkt - RXBUF_START_ADDR);
                     spin_unlock(&aml_hw->buf_start_lock);

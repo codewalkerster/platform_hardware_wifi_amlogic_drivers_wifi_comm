@@ -1089,6 +1089,14 @@ static inline int aml_pcie_rx_scanu_result_ind(struct aml_hw *aml_hw,
     return 0;
 }
 
+static inline int aml_sdio_rx_scanu_result_for_join_ind(struct aml_hw *aml_hw,
+                                                        struct aml_cmd *cmd,
+                                                        struct ipc_e2a_msg *msg)
+{
+    // scanu_result_ind upload by msg for join, it is same with pcie
+    aml_pcie_rx_scanu_result_ind(aml_hw, cmd, msg);
+    return 0;
+}
 
 static inline int aml_rx_scanu_result_ind(struct aml_hw *aml_hw,
                                            struct aml_cmd *cmd,
@@ -1274,9 +1282,10 @@ static inline int aml_rx_sm_connect_ind(struct aml_hw *aml_hw,
     struct wireless_dev *wdev = dev->ieee80211_ptr;
 
     AML_INFO("vif_idx:%d, status_code:%d, sta_idx:%d,"
-            "center_freq:%d, center_freq1:%d, roamed:%d",
+            "center_freq:%d, center_freq1:%d, roamed:%d, mac:%pM",
             ind->vif_idx, ind->status_code, ind->ap_idx,
-            ind->chan.prim20_freq, ind->chan.center1_freq, ind->roamed);
+            ind->chan.prim20_freq, ind->chan.center1_freq, ind->roamed,
+            (const u8 *)ind->bssid.array);
     aml_set_scan_hang(aml_vif, 0, __func__, __LINE__);
     aml_connect_flags_clr(aml_vif, AML_CONNECTING);
 
@@ -1338,7 +1347,6 @@ static inline int aml_rx_sm_connect_ind(struct aml_hw *aml_hw,
         aml_recy_flags_set(AML_RECY_RX_RATE_ALLOC);
         aml_rx_rate_wq(&sta->sta_idx);
 #endif
-        aml_connect_flags_set(aml_vif, AML_GETTING_IP);
         aml_txq_tdls_vif_init(aml_vif);
         aml_mu_group_sta_init(sta, NULL);
         /* Look for TDLS Channel Switch Prohibited flag in the Extended Capability
@@ -1539,6 +1547,7 @@ static inline int aml_rx_sm_disconnect_ind(struct aml_hw *aml_hw,
 #endif
 
     aml_connect_flags_clr(aml_vif, AML_DISCONNECTING);
+    aml_connect_flags_clr(aml_vif, AML_GETTING_IP);
     return 0;
 }
 
@@ -1563,6 +1572,7 @@ static inline int aml_rx_sm_external_auth_required_ind(struct aml_hw *aml_hw,
     params.key_mgmt_suite = ind->akm;
     AML_INFO("ind->vif_idx > NX_VIRT_DEV_MAX %d, !aml_vif->up %d, (AML_VIF_TYPE(aml_vif) != NL80211_IFTYPE_STATION) %d",
              ind->vif_idx > NX_VIRT_DEV_MAX, !aml_vif->up, (AML_VIF_TYPE(aml_vif) != NL80211_IFTYPE_STATION));
+
     if ((ind->vif_idx > NX_VIRT_DEV_MAX) || !aml_vif->up ||
         (AML_VIF_TYPE(aml_vif) != NL80211_IFTYPE_STATION) ||
         cfg80211_external_auth_request(dev, &params, GFP_ATOMIC)) {
@@ -1967,6 +1977,7 @@ static inline int aml_dma_dl_result_ind(struct aml_hw *aml_hw,
     return 0;
 }
 #endif
+
 static inline int aml_coex_get_status_ind(struct aml_hw *aml_hw,
                                       struct aml_cmd *cmd,
                                       struct ipc_e2a_msg *msg)
@@ -2008,7 +2019,6 @@ static inline int aml_coex_get_status_ind(struct aml_hw *aml_hw,
 
     return 0;
 }
-
 static inline int aml_scanu_cancel_cfm(struct aml_hw *aml_hw,
                                       struct aml_cmd *cmd,
                                       struct ipc_e2a_msg *msg)
@@ -2284,6 +2294,7 @@ static msg_cb_fct priv_hdlrs[MSG_I(PRIV_SUB_E2A_MAX)] = {
     [MSG_I(PRIV_COEX_STOP_RESTORE_TXQ_IND)] = aml_rx_coexist_stop_restore_txq_ind,
     [MSG_I(PRIV_TRAFFIC_BUSY_IND)]    = aml_traffic_busy_ind,
     [MSG_I(PRIV_COEX_GET_STATUS)]     = aml_coex_get_status_ind,
+    [MSG_I(PRIV_SCANU_RESULT_IND)]    = aml_sdio_rx_scanu_result_for_join_ind,
 };
 
 static msg_cb_fct *msg_hdlrs[] = {

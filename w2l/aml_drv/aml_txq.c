@@ -208,7 +208,6 @@ static void aml_txq_init(struct aml_txq *txq, int idx, u8 status,
             txq->ndev_idx = NX_STA_NDEV_IDX(sta_tid, sta_idx);
         else
             txq->ndev_idx = NDEV_NO_TXQ;
-        AML_INFO("sta_tid=%d, sta_idx=%d, txq->ndev_idx=%d\n", sta_tid, sta_idx, txq->ndev_idx);
     } else if (idx < NX_FIRST_UNK_TXQ_IDX) {
         txq->ndev_idx = NX_BCMC_TXQ_NDEV_IDX;
     } else {

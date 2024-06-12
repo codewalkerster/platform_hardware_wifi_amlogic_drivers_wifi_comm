@@ -18,20 +18,31 @@
 #define SDIO_PAGE_MAX    61
 #endif
 
-#define SDIO_FRAME_TAIL_LEN    12
-#define SDIO_PAGE_LEN    1600
+#define SDIO_TX_CKSUM_AMSDU_FLAG     1
+#define SDIO_TX_CKSUM_VLAN_FLAG      2
+#define SDIO_TX_CKSUM_FRAG_FLAG      4
+#define SDIO_TX_CKSUM_ENABLE         8
+#define SDIO_TX_CKSUM_VLAN_ENABLE    16
+#define SDIO_TX_CKSUM_DATA_FLAG      32
 
-#define SDIO_DATA_OFFSET   84 //12  + 72
-#define SDIO_TXHEADER_LEN   76 //4  + 72
-#define SDIO_TXDESC_OFFSET  12  //12
+#define SDIO_FRAME_TAIL_LEN    12
+#define SDIO_PAGE_LEN    1568
+#define AMSDU_LLC_LEN    22
+#define LLC_LEN          8
+
+#define SDIO_DATA_OFFSET   88 //12  + 4 + 72
+#define SDIO_TXHEADER_LEN   80 //4  + 4 + 72
+#define SDIO_TXDESC_OFFSET  16    //12 + 4
+#define SDIO_CKSUM_OFFSET   12
+#define AMSDU_LLC_OFFSET    94 // 4 + 4 + 72 + 14
 #define SECOND_PAGE_DATA_OFFSET 12
-#define TXDESC_OFFSET        4 // 4
+#define TXDESC_OFFSET         8 // 4 + 4
 #define USB_DATA_OFFSET    72 //payload offset
 
-#define SDIO_TX_PAGE_SMALL_SKIP_NUM 143
-#define SDIO_TX_PAGE_NUM_SMALL 113
+#define SDIO_TX_PAGE_SMALL_SKIP_NUM 141
+#define SDIO_TX_PAGE_NUM_SMALL 115
 #define SDIO_TX_PAGE_NUM_LARGE 255
-#define SDIO_DYNA_PAGE_NUM  142
+#define SDIO_DYNA_PAGE_NUM  140
 
 #if defined (USB_TX_USE_LARGE_PAGE) || defined (CONFIG_AML_USB_LARGE_PAGE)
 #define USB_PAGE_MAX    25
@@ -56,7 +67,7 @@
 #define USB_LA_PAGE_NUM  35
 #endif
 
-#define SDIO_LA_PAGE_NUM  41
+#define SDIO_LA_PAGE_NUM  42
 #define USB_WRITE_SRAM_LEN 480
 #define USB_TX_ADDRESSTABLE_NUM  TX_PAGE_NUM_SMALL/2
 

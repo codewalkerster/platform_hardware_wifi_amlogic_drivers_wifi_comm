@@ -22,10 +22,9 @@
 #define BUFFER_NARROW           BIT(0)
 #define BUFFER_EXPAND           BIT(1)
 #define BUFFER_UPDATE_FLAG      BIT(2)
-#define BUFFER_NOTIFY           BIT(3)
+#define BUFFER_REDUCE_FINSH     BIT(3)
 #define BUFFER_WRAP             BIT(4)
 #define BUFFER_EXPEND_FINSH     BIT(5)
-#define BUFFER_TX_USED_FLAG     BIT(6)
 
 #define RXDESC_CNT_READ_ONCE 32
 
@@ -51,7 +50,7 @@
 #define NEXT_PKT_OFFSET 120
 #else
 #ifndef CONFIG_AML_RX_BIGSIZE
-#define RX_DESC_SIZE                   (56)
+#define RX_DESC_SIZE                   (52)
 #define RX_HEADER_OFFSET               (0)
 #define RX_PD_LEN                      (0)
 #define RX_PAYLOAD_OFFSET              (RX_DESC_SIZE + RX_PD_LEN)
@@ -60,7 +59,7 @@
 
 #define RX_HOSTID_OFFSET               (8)
 #define RX_REORDER_LEN_OFFSET          (10)
-#define RX_STATUS_OFFSET               (52)
+#define RX_STATUS_OFFSET               (4)
 #define RX_FRMLEN_OFFSET               (0)
 #define NEXT_PKT_OFFSET                (28)
 #else
@@ -250,11 +249,12 @@ struct debug_push_rxbuff_info {
 struct rxbuf_list{
     struct list_head list;
     unsigned char *rxbuf;
-    unsigned int first_len;
-    unsigned int second_len;
-    unsigned int rx_buf_end;
-    unsigned int rx_buf_len;
-    unsigned int rxbuf_data_start;
+    unsigned int first_len;        /* the first len of sharemem rxbuf data, after sharemem rxbuf data loopback */
+    unsigned int second_len;       /* the second len of sharemem rxbuf data, after sharemem rxbuf data loopback */
+    unsigned int rx_buf_end;       /* sharemem rxbuf end addr when the current host rxbuf reads rx data */
+    unsigned int rx_buf_len;       /* sharemem rxbuf len when the current host rxbuf reads rx data */
+    unsigned int rxbuf_data_start; /* sharemem rxdesc start addr when the current host rxbuf reads data */
+    unsigned int rxbuf_data_end;   /* sharemem rxdesc end addr when the current host rxbuf reads data */
 };
 
 struct aml_dyn_snr_cfg {

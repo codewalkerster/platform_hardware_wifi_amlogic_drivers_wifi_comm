@@ -157,6 +157,7 @@ struct aml_sw_txhdr {
     unsigned long jiffies;
     struct txdesc_host desc;
     struct list_head list;
+    u8 txcfm_token;
 };
 
 /**
@@ -173,7 +174,9 @@ struct aml_txhdr {
 struct aml_sdio_txhdr {
     struct aml_sw_txhdr *sw_hdr;
     unsigned int mpdu_buf_flag;// 4
+    unsigned int cksum_flag;// 4
     struct txdesc_host desc; //72
+    unsigned char hdr[AMSDU_LLC_LEN]; //amsdu hdr + llc
 };
 struct aml_usb_txhdr {
     struct aml_sw_txhdr *sw_hdr; //8 byte
@@ -225,7 +228,7 @@ enum {
  * AML_TX_HEADROOM - Headroom to use to store struct aml_txhdr
  */
 #define AML_TX_HEADROOM sizeof(struct aml_txhdr)
-#define AML_SDIO_TX_HEADROOM sizeof(struct aml_sw_txhdr *) + sizeof(unsigned int) + sizeof(struct txdesc_host)
+#define AML_SDIO_TX_HEADROOM sizeof(struct aml_sw_txhdr *) + sizeof(unsigned int) + sizeof(unsigned int) + sizeof(struct txdesc_host) + AMSDU_LLC_LEN
 #define AML_USB_TX_HEADROOM sizeof(struct aml_usb_txhdr)
 /**
  * AML_TX_AMSDU_HEADROOM - Maximum headroom need for an A-MSDU sub frame
@@ -315,9 +318,13 @@ void aml_txq_credit_update(struct aml_hw *aml_hw, int sta_idx, u8 tid,
                             s8 update);
 void aml_tx_push(struct aml_hw *aml_hw, struct aml_txhdr *txhdr, int flags);
 int aml_update_tx_cfm(void *pthis);
-int aml_sdio_tx_task(void *data);
-bool aml_filter_sp_data_frame(struct sk_buff *skb,struct aml_vif *aml_vif,AML_SP_STATUS_E sp_status);
-int aml_prep_dma_tx(struct aml_hw *aml_hw, struct aml_sw_txhdr *sw_txhdr, void *frame_start);
-void aml_tx_cfm_wait_rsp(struct aml_hw *aml_hw, bool ack, u8* func, u32 line);
 
+int aml_sdio_tx_task(void *data);
+bool aml_filter_sp_data_frame(struct sk_buff *skb, struct aml_vif *aml_vif, AML_SP_STATUS_E sp_status, u8 *token);
+
+
+int aml_prep_dma_tx(struct aml_hw *aml_hw, struct aml_sw_txhdr *sw_txhdr, void *frame_start);
+void sdio_checksum_process(struct aml_hw *aml_hw, struct sk_buff *skb, u8 *hw_calc, u8 *is_frag);
+
+void aml_tx_cfm_wait_rsp(struct aml_hw *aml_hw, bool ack, u8* func, u32 line);
 #endif /* _AML_TX_H_ */

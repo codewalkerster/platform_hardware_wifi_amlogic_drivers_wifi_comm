@@ -234,13 +234,23 @@ typedef union RG_RECV_A21_FIELD
 
 #define RG_RECV_A22                               (0x58)
 // Bit 9   :0      rg_cw_dc_remove_cnt            U     RW        default = 'h3f
+// Bit 26  :16     rg_dc_dc_remove_cnt1           U     RW        default = 'h7ff
+// Bit 28          rg_dc_dc_remove_cnt_sel0       U     RW        default = 'h0
+// Bit 29          rg_dc_dc_remove_cnt_sel1       U     RW        default = 'h0
+// Bit 30          rg_dc_dc_remove_cnt_clr_en     U     RW        default = 'h0
 typedef union RG_RECV_A22_FIELD
 {
   unsigned int data;
   struct
   {
     unsigned int rg_cw_dc_remove_cnt : 10;
-    unsigned int rsvd_0 : 22;
+    unsigned int rsvd_0 : 6;
+    unsigned int rg_dc_dc_remove_cnt1 : 11;
+    unsigned int rsvd_1 : 1;
+    unsigned int rg_dc_dc_remove_cnt_sel0 : 1;
+    unsigned int rg_dc_dc_remove_cnt_sel1 : 1;
+    unsigned int rg_dc_dc_remove_cnt_clr_en : 1;
+    unsigned int rsvd_2 : 1;
   } b;
 } RG_RECV_A22_FIELD_T;
 

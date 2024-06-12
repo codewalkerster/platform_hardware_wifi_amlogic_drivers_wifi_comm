@@ -76,9 +76,9 @@ enum wifi_cmd {
     CMD_DOWNLOAD_BT,
     CMD_GET_TX_CFM,
     CMD_OTHER_CMD,
-    CMD_USB_IRQ
+    CMD_USB_IRQ,
+    CMD_BBPLL_INIT,
 };
-
 
 enum usb_endpoint_num{
     USB_EP0 = 0x0,
@@ -116,5 +116,6 @@ struct aml_hwif_usb {
 };
 
 int aml_usb_insmod(void);
+struct urb * auc_alloc_urb(int iso_packets, gfp_t mem_flags);
 
 #endif

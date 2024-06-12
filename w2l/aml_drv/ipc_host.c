@@ -1042,7 +1042,9 @@ void aml_store_excep_info(struct aml_hw *aml_hw)
     }
 
     AML_INFO("\n%s", fbuf);
+#ifdef CONFIG_AML_DEBUGFS
     aml_send_err_info_to_diag(fbuf, strlen(fbuf));
+#endif
 }
 
 void aml_sdio_usb_extend_irq_handle(struct aml_hw *aml_hw)

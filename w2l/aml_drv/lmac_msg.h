@@ -399,6 +399,7 @@ enum priv_e2a_tag {
     PRIV_COEX_STOP_RESTORE_TXQ_IND,
     PRIV_TRAFFIC_BUSY_IND,
     PRIV_COEX_GET_STATUS,
+    PRIV_SCANU_RESULT_IND,
     PRIV_SUB_E2A_MAX,
 };
 
@@ -453,6 +454,8 @@ enum mm_sub_a2e_tag {
     MM_SUB_FIX_TXPWR,
     MM_SUB_SET_EARLY_BEACON_MODE,
     MM_SUB_COEX_GET_STATUS,
+    MM_SUB_SET_MCC_RATIO,
+    MM_SUB_SET_WFA_INFO,
     /// the MAX
     MM_SUB_A2E_MAX,
     /// New members cannot be added below
@@ -3055,7 +3058,7 @@ struct csi_complex{
 struct csi_sp_status_get_ind
 {
     u32_l data_len;
-    struct csi_complex csi[241];
+    struct csi_complex csi[250];
 };
 
 struct efuse_read_result_ind {
@@ -3087,6 +3090,11 @@ struct coex_get_status
     u8_l tx_agg_num; //the tx agg num coex setting;
     u8_l rx_agg_num; //the rx agg num coex setting;
     u32_l bt_work_status; // bt connect info;
+
+    u32_l wifi_inact_sum;
+    u32_l wifi_act_sum;
+    u8_l poc_cali_status;
+    u8_l link_cali_status;
 };
 
 struct scan_hang_req
@@ -3362,6 +3370,11 @@ struct set_la_capture_req
     u32_l bus2;
 };
 
+struct mcc_ratio_req
+{
+    u8_l mcc_ratio;
+};
+
 /* mask
 bit1 reg_rxv2_nss_mask
 bit2 reg_rx_format_mask
@@ -3394,5 +3407,9 @@ struct early_bcn
     uint8_t   element_4;
 };
 
+struct wfa_test_req
+{
+    bool wfa_rts_based_txop_dur;
+};
 
 #endif // LMAC_MSG_H_

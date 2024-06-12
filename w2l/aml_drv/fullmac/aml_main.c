@@ -49,6 +49,7 @@
 #include "aml_rps.h"
 #include "aml_prof.h"
 #include "aml_mdns_offload.h"
+#include "aml_fw_trace.h"
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 14, 0)
 #include "linux/panic_notifier.h"
@@ -522,6 +523,8 @@ extern void aml_trace_buf_deinit(void);
 extern struct aml_bus_state_detect bus_state_detect;
 extern struct usb_device *g_udev;
 extern unsigned char g_wifi_in_insmod;
+extern struct aml_trace_nl_info g_trace_nl_info;
+extern unsigned int resume_flag;
 
 /*********************************************************************
  * helper
@@ -1019,7 +1022,6 @@ static int aml_open(struct net_device *dev)
     }
     aml_recy_flags_set(AML_RECY_OPEN_VIF_PROC);
 #endif
-
     // Check if it is the first opened VIF
     if (strncmp(dev->name, AML_IFNAME_STA, 4) == 0) {
         memcpy(dev->dev_addr, aml_hw->wiphy->addresses[0].addr, ETH_ALEN);
@@ -1193,6 +1195,10 @@ static int aml_close(struct net_device *dev)
         (aml_connect_flags_chk(aml_vif, AML_CONNECTING))) {
         AML_INFO("vif is connecting\n");
         aml_cfg80211_disconnect(aml_hw->wiphy, dev, 0);
+    }
+
+    if (aml_vif->vif_index == AML_P2P_VIF_IDX) {
+        aml_hw->wfd_present = false;
     }
 
     aml_send_remove_if(aml_hw, aml_vif->vif_index);
@@ -1408,6 +1414,12 @@ static void aml_netdev_setup(struct net_device *dev)
     dev->wireless_handlers = &iw_handle;
 
     dev->hw_features = 0;
+    if (aml_bus_type == SDIO_MODE) {
+        if (aml_mod_params.cksum_en) {
+            dev->features |= NETIF_F_HW_CSUM;
+            dev->hw_features |= dev->features;
+        }
+    }
 }
 
 /*********************************************************************
@@ -5084,7 +5096,10 @@ static int aml_ps_wow_resume(struct aml_hw *aml_hw)
 
     AML_DBG(AML_FN_ENTRY_STR);
 
-    aml_enable_sdio_irq(aml_hw);
+    if (aml_bus_type == SDIO_MODE)
+    {
+        aml_enable_sdio_irq(aml_hw);
+    }
 
     if (aml_hw->state == WIFI_SUSPEND_STATE_NONE) {
         return -EINVAL;
@@ -5097,12 +5112,6 @@ static int aml_ps_wow_resume(struct aml_hw *aml_hw)
 
         if (atomic_read(&g_wifi_pm.drv_suspend_cnt)) {
             atomic_set(&g_wifi_pm.drv_suspend_cnt, 0);
-            USB_BEGIN_LOCK();
-            ret = usb_submit_urb(aml_hw->g_urb, GFP_ATOMIC);
-            USB_END_LOCK();
-            if (ret < 0) {
-                ERROR_DEBUG_OUT("usb_submit_urb failed %d\n", ret);
-            }
         }
     }
 
@@ -5338,12 +5347,7 @@ static int aml_ps_wow_suspend(struct aml_hw *aml_hw, struct cfg80211_wowlan *wow
     }
 
     if (aml_bus_type == USB_MODE) {
-        USB_BEGIN_LOCK();
         atomic_set(&g_wifi_pm.drv_suspend_cnt, 1);
-        if (aml_hw->g_urb->status != 0) {
-            usb_kill_urb(aml_hw->g_urb);
-        }
-        USB_END_LOCK();
     } else if (aml_bus_type == PCIE_MODE) {
         aml_hw->repush_rxdesc = 0;
         aml_hw->repush_rxbuff_cnt = 0;
@@ -5389,7 +5393,10 @@ static int aml_cfg80211_suspend(struct wiphy *wiphy, struct cfg80211_wowlan *wow
     if (aml_bus_type == PCIE_MODE)
         free_irq(aml_hw->plat->pci_dev->irq, aml_hw);
 #endif
-    aml_disable_sdio_irq(aml_hw);
+
+    if (aml_bus_type == SDIO_MODE)
+        while (aml_disable_sdio_irq(aml_hw));
+
     AML_PRINT(AML_DBG_MODULES_MAIN, "%s ok exit   %d\n", __func__, __LINE__);
     return 0;
 #else
@@ -5421,9 +5428,10 @@ static int aml_cfg80211_resume(struct wiphy *wiphy)
     while (atomic_read(&g_wifi_pm.bus_suspend_cnt) > 0) {
         msleep(50);
         cnt++;
-        if (cnt > 40) {
+        if (cnt > 400) {
             AML_INFO("no resume cnt 0x%x\n",
                     atomic_read(&g_wifi_pm.bus_suspend_cnt));
+            atomic_set(&g_wifi_pm.bus_suspend_cnt, 0);
             return -1;
         }
     }
@@ -5434,7 +5442,7 @@ static int aml_cfg80211_resume(struct wiphy *wiphy)
     atomic_set(&g_wifi_pm.drv_suspend_cnt, 0);
     AML_PRINT(AML_DBG_MODULES_MAIN, "%s,%d, resume is ok\n", __func__, __LINE__);
     /* The host reads fw trace logs once after the resume */
-    if (aml_bus_type != PCIE_MODE) {
+    if ((aml_bus_type != PCIE_MODE) && g_trace_nl_info.enable && resume_flag) {
         aml_traceind(aml_hw->ipc_env->pthis);
     }
     return 0;
@@ -6408,6 +6416,7 @@ const struct wiphy_vendor_command aml_wiphy_vendor_commands[] =
 {
     ANDROID_MDNS_OFFLOAD_VENDOR_CMD,
 };
+
 static int aml_interface_add_all(struct aml_hw *aml_hw, bool custchan)
 {
     struct wireless_dev *wdev;
@@ -6579,7 +6588,13 @@ int aml_cfg80211_init(struct aml_plat *aml_plat, void **platform_data)
     wiphy->extended_capabilities_mask = aml_hw->ext_capa;
     wiphy->extended_capabilities_len = ARRAY_SIZE(aml_hw->ext_capa);
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0) // template solution for S905L3A
 #ifndef CONFIG_AML_USE_TASK
+    if (aml_bus_type == PCIE_MODE) {
+        tasklet_init(&aml_hw->task, aml_pcie_task, (unsigned long)aml_hw);
+    }
+#endif
+#else
     if (aml_bus_type == PCIE_MODE) {
         tasklet_init(&aml_hw->task, aml_pcie_task, (unsigned long)aml_hw);
     }

@@ -57,6 +57,7 @@ struct aml_mod_params {
     int tx_to_vi;
     int tx_to_vo;
     int amsdu_tx;
+    bool cksum_en;
 #ifdef CONFIG_AML_SOFTMAC
     bool mfp_on;
     bool gf_on;
