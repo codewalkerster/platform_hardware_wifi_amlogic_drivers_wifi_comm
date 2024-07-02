@@ -13,6 +13,8 @@
 #define WIFI_CHIP_TYPE_W1     0x0ffbf0f0
 #define WIFI_CHIP_TYPE_W1U    0x0ffbf2f0
 
+extern void aml_wifi_chip(const char *type);
+
 
 #define RG_SCFG_FUNC2_BADDR_A (0x8040)
 
