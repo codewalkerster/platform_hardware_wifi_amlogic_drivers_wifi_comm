@@ -44,5 +44,6 @@ aml_w2_s
 aml_w2_p
 */
 
+extern void aml_chipid_set(unsigned int chipid);
 
 #endif

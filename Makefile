@@ -41,6 +41,16 @@ SRCTOP ?= /proj/vlsi.wifi/p212_32bit
 KERNELDIR ?= $(SRCTOP)/out/target/product/ampere/obj/KERNEL_OBJ
 endif
 
+#buildroot
+ifeq ($(CONFIG_BUILDROOT),y)
+EXTRA_CFLAGS += -Wno-error=implicit-function-declaration
+EXTRA_CFLAGS += -Wno-implicit-function-declaration
+endif
+
+ifneq ($(CONFIG_USB_CLOSE),y)
+EXTRA_CFLAGS += -DCONFIG_USB
+endif
+
 CC        ?= $(CROSS_COMPILE)gcc
 STRIP     ?= $(CROSS_COMPILE)strip
 
@@ -71,10 +81,7 @@ wifi_comm-objs := \
 all: modules
 
 modules clean:
-	@$(PWD)/mklink.sh
 	$(MAKE)  CUR_DIR=$(CUR_DIR) ARCH=$(ARCH) CROSS_COMPILE=$(CROSS_COMPILE) -C $(KERNEL_SRC) M=$(M) $@
-	@$(PWD)/mklink.sh clean
-
 
 modules_install:
 	@$(MAKE) INSTALL_MOD_STRIP=1 M=$(M) -C $(KERNEL_SRC) modules_install
