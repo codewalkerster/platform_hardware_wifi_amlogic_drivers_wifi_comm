@@ -132,24 +132,29 @@ int aml_wifi_sdio_probe(struct sdio_func *func, const struct sdio_device_id *id)
 {
     int ret = 0;
     static struct sdio_func sdio_func_0;
+    static int print_count=0;
     unsigned int chip1_id = 0, loop_cnt = 0;
 
-    printk("%s: %d, sdio probe product id 0x%x\n", __func__, __LINE__, id->device);
+    if (!print_count) {
+        printk("%s: %d, sdio probe product id 0x%x\n", __func__, __LINE__, id->device);
+        print_count++;
+    }
+
     if (id->device == W2s_A_PRODUCT_AMLOGIC_EFUSE
         || id->device == W2s_B_PRODUCT_AMLOGIC_EFUSE) {
         aml_wifi_chip("aml_w2_s");
-        printk("%s: ********get chip type: aml_w2_s \n", __func__);
+        //printk("%s: ********get chip type: aml_w2_s \n", __func__);
         return ret;
     } else if (id->device == W1us_PRODUCT_AMLOGIC_EFUSE
         || id->device == W1us_A_PRODUCT_AMLOGIC_EFUSE
         || id->device == W1us_B_PRODUCT_AMLOGIC_EFUSE
         || id->device == W1us_C_PRODUCT_AMLOGIC_EFUSE) {
         aml_wifi_chip("aml_w1u_s");
-        printk("%s: ********get chip type: aml_w1u_s \n", __func__);
+        //printk("%s: ********get chip type: aml_w1u_s \n", __func__);
         return ret;
     } else if (id->device == W1_PRODUCT_AMLOGIC_EFUSE) {
         aml_wifi_chip("aml_w1");
-        printk("%s: ********get chip type: aml_w1 \n", __func__);
+        //printk("%s: ********get chip type: aml_w1 \n", __func__);
         return ret;
     }
     /* else if (id->device == W2_PRODUCT_AMLOGIC || id->device == W1_PRODUCT_AMLOGIC) */
@@ -163,8 +168,8 @@ int aml_wifi_sdio_probe(struct sdio_func *func, const struct sdio_device_id *id)
     else
         sdio_set_block_size(func, 512);
 
-    printk("%s(%d): func->num %d sdio block size=%d, \n", __func__, __LINE__,
-        func->num,  func->cur_blksize);
+    //printk("%s(%d): func->num %d sdio block size=%d, \n", __func__, __LINE__,
+     //   func->num,  func->cur_blksize);
 
     if (func->num == 1)
     {
@@ -173,8 +178,8 @@ int aml_wifi_sdio_probe(struct sdio_func *func, const struct sdio_device_id *id)
         g_wifi_sdio.sdio_func_if[0] = &sdio_func_0;
     }
     g_wifi_sdio.sdio_func_if[func->num] = func;
-    printk("%s(%d): func->num %d sdio_func=%p, \n", __func__, __LINE__,
-        func->num,  func);
+    //printk("%s(%d): func->num %d sdio_func=%p, \n", __func__, __LINE__,
+     //   func->num,  func);
 
     sdio_release_host(func);
     sdio_set_drvdata(func, (void *)(&g_wifi_sdio));
@@ -191,13 +196,13 @@ sdio_chip_id:
 
     if (chip1_id == WIFI_CHIP_TYPE_W2) {
         aml_wifi_chip("aml_w2_s");
-        printk("%s: ********get chip type: aml_w2_s \n", __func__);
+        //printk("%s: ********get chip type: aml_w2_s \n", __func__);
     } else if (chip1_id == WIFI_CHIP_TYPE_W1U) {
         aml_wifi_chip("aml_w1u_s");
-        printk("%s: ********get chip type: aml_w1u_s \n", __func__);
+        //printk("%s: ********get chip type: aml_w1u_s \n", __func__);
     } else if (chip1_id == WIFI_CHIP_TYPE_W1) {
         aml_wifi_chip("aml_w1");
-        printk("%s: ********get chip type: aml_w1 \n", __func__);
+        //printk("%s: ********get chip type: aml_w1 \n", __func__);
     } else {
         printk("%s: wifi chip id check failed\n", __func__);
         if (loop_cnt++ < 20)
@@ -219,10 +224,6 @@ static void  aml_wifi_sdio_remove(struct sdio_func *func)
     {
         return ;
     }
-
-    printk("\n==========================================\n");
-    printk("aml_sdio_remove++ func->num =%d \n",func->num);
-    printk("==========================================\n");
 
     sdio_claim_host(func);
     sdio_disable_func(func);
